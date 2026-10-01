@@ -352,7 +352,9 @@ test('review fixes: save failure keeps the block, pinned diff format, full .env 
   for (const [k, v] of [['diff.noprefix', 'true'], ['color.diff', 'always'], ['color.ui', 'always'], ['diff.mnemonicPrefix', 'true']]) g('config', k, v);
   writeFileSync(join(repo, '.env'), 'DB_URL=postgres://u:secretpw@h/db\n');
   g('add', '.env');
-  const diff = execFileSync('sh', ['-c', DIFF_CMD], { cwd: repo, encoding: 'utf8' });
+  // Call git directly: no sh on PATH in PowerShell/cmd. DIFF_CMD has no quoting, so a space split is exact.
+  const [bin, ...diffArgs] = DIFF_CMD.split(' ');
+  const diff = execFileSync(bin, diffArgs, { cwd: repo, encoding: 'utf8' });
   assert.ok(!/\x1b\[/.test(diff), 'no ANSI color');
   assert.match(diff, /^diff --git a\/\.env b\/\.env$/m);
   assert.ok(!maskDiff(diff).includes('secretpw'));
