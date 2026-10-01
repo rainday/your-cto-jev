@@ -40,6 +40,28 @@ Architecture and complexity only warn on purpose. They are subjective, and a gat
 
 When nothing crosses a threshold, `cto` prints nothing at all.
 
+## How it works
+
+```mermaid
+flowchart TD
+    A["git commit"] --> B["Staged diff<br/>minus lock files, minified files, maps, binaries<br/>split into ~24k-token chunks"]
+    C["Agent shell command<br/>Claude Code · Cursor · Gemini CLI · Codex"] --> D["Command + failures from the last 15 min"]
+    E["Agent command failed"] --> F[("Error recorded locally<br/>no API call")]
+    F -.-> D
+    B --> M["Mask secrets<br/>keys, tokens, .env values"]
+    D --> M
+    M --> P1{"Cloudflare<br/>Workers AI"}
+    P1 -- "answers" --> J{"Jev scores vs<br/>.cto.json thresholds"}
+    P1 -- "error, cooling down or no key" --> P2{"OpenRouter"}
+    P2 -- "answers" --> J
+    P2 -- "error or no key" --> O["Fail open<br/>let it through"]
+    J -- "secret, destructive or loop" --> X["BLOCK<br/>commit exit 1 · tool call exit 2"]
+    J -- "complex or off the sprint goal" --> W["Warn, then allow"]
+    J -- "nothing crosses" --> S["Allow silently"]
+```
+
+A provider that fails is skipped for 5 minutes after a timeout, `429` or `5xx`, or for 1 hour after an auth or billing error, then retried. A `400` means the request itself is wrong, so `cto` fails open without trying the other provider.
+
 ## Quick start
 
 Requires Node.js 22 or newer.
