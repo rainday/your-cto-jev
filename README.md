@@ -67,10 +67,12 @@ A provider that fails is skipped for 5 minutes after a timeout, `429` or `5xx`, 
 Requires Node.js 22 or newer.
 
 ```sh
-npm install -g github:rainday/your-cto-jev
+npm install -g https://github.com/rainday/your-cto-jev/archive/refs/heads/main.tar.gz
 cd your-project
 cto setup
 ```
+
+Use the tarball URL rather than `github:rainday/your-cto-jev`. For global installs from a git URL, npm on Windows links the package to a temporary clone it later deletes, which leaves `cto` broken. Run the same command again to update.
 
 `cto setup` walks you through it in the terminal:
 
