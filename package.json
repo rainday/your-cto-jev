@@ -36,8 +36,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc",
-    "prepare": "tsc",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
     "test": "tsc && node --test \"dist/*.test.js\""
   },
   "devDependencies": {
