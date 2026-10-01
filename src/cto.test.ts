@@ -422,3 +422,32 @@ test('test_tampering: asked only when tests are touched, blocks above threshold'
   assert.equal(out.code, 0);
   setKeys(false);
 });
+
+test('readHidden: no echo, backspace, bracketed paste, Ctrl+C, restores raw mode', async () => {
+  const { readHidden } = await import('./wizard.js');
+  const { EventEmitter } = await import('node:events');
+  const fakeIn = () => Object.assign(new EventEmitter(), {
+    raw: [] as boolean[],
+    setRawMode(m: boolean) { this.raw.push(m); },
+    setEncoding() {}, resume() {}, pause() {},
+  });
+  const echoed: string[] = [];
+  const out = { write: (s: string) => echoed.push(s) };
+
+  let input = fakeIn();
+  let p = readHidden('Key: ', input, out);
+  input.emit('data', 'sk-abX');
+  input.emit('data', '\u007f');
+  input.emit('data', '\x1b[200~cd\x1b[201~');
+  input.emit('data', '\r');
+  assert.equal(await p, 'sk-abcd');
+  assert.deepEqual(echoed, ['Key: ', '\n'], 'typed characters are never echoed');
+  assert.deepEqual(input.raw, [true, false]);
+  assert.equal(input.listenerCount('data'), 0);
+
+  input = fakeIn();
+  p = readHidden('Key: ', input, out);
+  input.emit('data', 'abc\u0003');
+  await assert.rejects(p, /aborted/);
+  assert.deepEqual(input.raw, [true, false]);
+});

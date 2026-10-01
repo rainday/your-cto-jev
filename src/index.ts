@@ -75,7 +75,13 @@ if (args[0] === '--hook' && args[1]) {
   if (list) chosen = list.split(',').map((s) => s.trim()).filter((s): s is AgentName => (agentNames as string[]).includes(s));
   else if (!uninstall && process.stdin.isTTY && process.stdout.isTTY && !args.includes('--yes')) {
     const { ask, close } = terminalAsk();
-    try { chosen = await wizard(ask, lang, detectAgents(), (s) => console.log(s), args.includes('--keys')); } finally { close(); }
+    try {
+      chosen = await wizard(ask, lang, detectAgents(), (s) => console.log(s), args.includes('--keys'));
+    } catch {
+      process.exit(130); // Ctrl+C or closed input: stop quietly, nothing has been written yet
+    } finally {
+      close();
+    }
   } else if (!uninstall) {
     chosen = detectAgents();
   }
