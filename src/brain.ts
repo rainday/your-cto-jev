@@ -27,6 +27,7 @@ export const DEFAULT_CONFIG: CtoConfig = {
     destructive_command: 0.7,
     infinite_loop: 0.85,
     architecture_violation: 0.85,
+    test_tampering: 0.8,
     code_complexity: 2,
   },
 };

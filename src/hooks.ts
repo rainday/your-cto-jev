@@ -39,6 +39,21 @@ const Q = {
       false: 'A new approach, a fix attempt, or unrelated to the earlier failures',
     },
   },
+  test_tampering: {
+    type: 'noul',
+    instructions:
+      'Does this git diff weaken the test suite to make failures disappear, rather than fixing the code under test? ' +
+      'Weakening includes: skipping or commenting out tests, deleting assertions or whole tests while the code they cover stays, ' +
+      'replacing exact expectations with vague ones, changing an expected value to match current output without changing the code, ' +
+      'swallowing errors the test should check, or lowering coverage thresholds. ' +
+      'Not weakening: fixing source code, adding or tightening tests, refactoring tests without losing checks, ' +
+      'updating expectations together with an intentional source change, removing tests together with the feature they cover, ' +
+      'or a conditional skip with a concrete reason and alternative coverage.',
+    criteria: {
+      true: 'The diff reduces what the tests verify without a matching intentional code change',
+      false: 'The tests verify as much or more, or changed together with the code they cover',
+    },
+  },
   code_complexity: {
     type: 'score',
     instructions: 'Rate the maintenance cost and structural complexity of this change.',
@@ -73,6 +88,11 @@ function verdict(lang: Lang, signal: Signal, v: number, cfg: CtoConfig, color: '
   return [s([color, 'bold'], head), s('dim', detail)];
 }
 
+// Test files, snapshots, test runner configs and package.json (test script). Matched on diff headers.
+const TESTISH =
+  /^diff --git a\/.+? b\/(?:.*\/)?(?:(?:tests?|__tests__|spec)\/.*|[^/]*\.(?:test|spec)\.[cm]?[jt]sx?|test_[^/]*\.py|[^/]*_test\.(?:py|go)|[^/]*\.snap|(?:jest|vitest|karma|playwright)\.config\.[^/]*|pytest\.ini|conftest\.py|tox\.ini|package\.json)$/m;
+export const touchesTests = (diff: string) => TESTISH.test(diff);
+
 export interface Env { root: string; lang: Lang; now?: () => number }
 
 // ---------- git-commit ----------
@@ -90,9 +110,16 @@ export async function gitCommit(rawDiff: string, { root, lang, now }: Env): Prom
 
   const notices = new Set<string>();
   const ctx = { brain, lang, timeoutMs: 5000, notices, now };
-  // Credential check on every chunk (no sampling); soft signals on the first chunk only. Max 3 in flight.
+  // Credential check on every chunk (no sampling); test check on chunks that touch tests; soft signals on the first chunk only. Max 3 in flight.
   const results: EvalResult[] = await pool(chunks, 3, (state, i) =>
-    evaluate({ state, questions: i === 0 ? { credential_leak: Q.credential_leak, ...soft } : { credential_leak: Q.credential_leak } }, ctx),
+    evaluate({
+      state,
+      questions: {
+        credential_leak: Q.credential_leak,
+        ...(touchesTests(state) && { test_tampering: Q.test_tampering }),
+        ...(i === 0 && soft),
+      },
+    }, ctx),
   );
 
   if (results.some((r) => !r.ok)) brain.skipped_attempts++;
@@ -102,12 +129,13 @@ export async function gitCommit(rawDiff: string, { root, lang, now }: Env): Prom
   for (const r of results) if (r.ok && r.provider !== primary) notices.add(t(lang, 'using', { name: providers[r.provider].label }));
 
   const lines: string[] = [];
-  const leaks = results.flatMap((r) => (r.ok ? [exceeded(r.answers, 'credential_leak', cfg)] : [])).filter((v) => v !== undefined);
-  if (leaks.length) {
+  for (const s of ['credential_leak', 'test_tampering'] as const) {
+    const hits = results.flatMap((r) => (r.ok ? [exceeded(r.answers, s, cfg)] : [])).filter((v) => v !== undefined);
+    if (!hits.length) continue;
     out.code = 1;
-    brain.blocked_attempts++;
-    lines.push(...verdict(lang, 'credential_leak', Math.max(...leaks), cfg, 'red'));
+    lines.push(...verdict(lang, s, Math.max(...hits), cfg, 'red'));
   }
+  if (out.code) brain.blocked_attempts++;
   const first = results[0];
   if (first?.ok) {
     for (const s of ['architecture_violation', 'code_complexity'] as const) {

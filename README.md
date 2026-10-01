@@ -31,10 +31,13 @@ Jev judges meaning and answers with probabilities, not prose. It costs about $0.
 | Signal | Where | What happens |
 |---|---|---|
 | `credential_leak` | every `git commit` | **Blocks** the commit |
+| `test_tampering` | `git commit`s that touch tests or test config | **Blocks** the commit |
 | `destructive_command` | every agent shell command | **Blocks** the command |
 | `infinite_loop` | agent shell commands, after a recent failure | **Blocks** the command |
 | `architecture_violation` | `git commit`, once you set a sprint goal | Warns only |
 | `code_complexity` | every `git commit` | Warns only |
+
+`test_tampering` catches the classic agent shortcut: making a red test green by skipping it, deleting its assertions, loosening the expectation, or lowering the coverage bar, instead of fixing the code. It lets through real fixes, new or tighter tests, refactors, and tests removed together with their feature.
 
 Architecture and complexity only warn on purpose. They are subjective, and a gate that blocks too often teaches people to use `git commit --no-verify`, which switches off the secret check too.
 
@@ -55,7 +58,7 @@ flowchart TD
     P1 -- "error, cooling down or no key" --> P2{"OpenRouter"}
     P2 -- "answers" --> J
     P2 -- "error or no key" --> O["Fail open<br/>let it through"]
-    J -- "secret, destructive or loop" --> X["BLOCK<br/>commit exit 1 · tool call exit 2"]
+    J -- "secret, weakened tests,<br/>destructive or loop" --> X["BLOCK<br/>commit exit 1 · tool call exit 2"]
     J -- "complex or off the sprint goal" --> W["Warn, then allow"]
     J -- "nothing crosses" --> S["Allow silently"]
 ```
@@ -155,6 +158,7 @@ Nothing else is uploaded, and nothing is logged unless you set `CTO_DEBUG=1`. Th
   "sprint_goal": "",
   "thresholds": {
     "credential_leak": 0.5,
+    "test_tampering": 0.8,
     "destructive_command": 0.7,
     "infinite_loop": 0.85,
     "architecture_violation": 0.85,
@@ -165,7 +169,8 @@ Nothing else is uploaded, and nothing is logged unless you set `CTO_DEBUG=1`. Th
 
 - **`sprint_goal`**: fill it in to enable the architecture check, for example `"Ship Stripe billing, no new services"`.
 - **Thresholds**: Jev returns a probability from 0 to 1. `code_complexity` is the exception: it is a score from 0 (clean) to 4 (unmaintainable).
-- **Calibration**: in our tests `git push --force` scored about 0.50 for `destructive_command`, so the default lets it through. Lower that threshold to about 0.45 if you want force pushes blocked.
+- **Calibration**: on 32 hand-written diffs, every one scoring above 0.8 for `test_tampering` really weakened the tests, and no legitimate change scored above 0.37. The 0.8 default caught 13 of 16 weakening diffs; the misses were subtle ones such as a meaningless float tolerance or a skip hidden behind an env var. Lower it to 0.5 to catch 15 of 16, at a higher risk of blocking honest commits.
+- In the same way, `git push --force` scored about 0.50 for `destructive_command`, so the default lets it through. Lower that threshold to about 0.45 if you want force pushes blocked.
 
 `.cto-brain.json` holds personal runtime state and is gitignored.
 

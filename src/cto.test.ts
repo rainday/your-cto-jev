@@ -390,3 +390,35 @@ test('review fixes: save failure keeps the block, pinned diff format, full .env 
   assert.ok(!existsSync(join(bad, '.git', 'hooks', 'pre-commit')), 'nothing written');
   setKeys(false);
 });
+
+test('test_tampering: asked only when tests are touched, blocks above threshold', async () => {
+  const { touchesTests } = await import('./hooks.js');
+  const hdr = (p: string) => `diff --git a/${p} b/${p}\n+x\n`;
+  for (const p of ['src/cart.test.ts', 'tests/test_tax.py', 'app/__tests__/a.js', 'pkg/sync_test.go', 'src/__snapshots__/B.test.tsx.snap',
+    'jest.config.js', 'vitest.config.ts', 'conftest.py', 'package.json', 'test/date.spec.js', 'e2e/login.spec.ts']) {
+    assert.ok(touchesTests(hdr(p)), p);
+  }
+  for (const p of ['src/cart.ts', 'README.md', 'src/latest.ts', 'docs/testing.md', 'src/contest.py']) assert.ok(!touchesTests(hdr(p)), p);
+
+  setKeys();
+  process.env.CTO_PROVIDER = 'openrouter';
+  const root = tmp();
+  let sent: any;
+  let reply: any = answers({ credential_leak: noul(0.01), test_tampering: noul(0.92) });
+  globalThis.fetch = (async (_u: string, init: any) => { sent = JSON.parse(init.body); return new Response(JSON.stringify(reply)); }) as any;
+  const weaken = 'diff --git a/src/cart.test.ts b/src/cart.test.ts\n--- a/src/cart.test.ts\n+++ b/src/cart.test.ts\n-  it(\'applies discount\', () => {\n+  it.skip(\'applies discount\', () => {\n';
+  let out = await gitCommit(weaken, { root, lang: 'en' });
+  assert.equal(out.code, 1);
+  assert.match(out.stderr.join('\n'), /Fix the code, not the tests/);
+  assert.ok(sent.questions.test_tampering);
+
+  reply = answers({ credential_leak: noul(0.01), test_tampering: noul(0.6) });
+  out = await gitCommit(weaken, { root, lang: 'en' });
+  assert.equal(out.code, 0, '0.6 is below the 0.8 default');
+
+  reply = answers({ credential_leak: noul(0.01) });
+  out = await gitCommit('diff --git a/src/cart.ts b/src/cart.ts\n+const a = 1;\n', { root, lang: 'en' });
+  assert.equal(sent.questions.test_tampering, undefined, 'no test files, no test question');
+  assert.equal(out.code, 0);
+  setKeys(false);
+});

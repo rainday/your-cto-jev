@@ -23,6 +23,7 @@ export const personaDict: Record<Lang, Record<Signal, string>> = {
     destructive_command: '停手。這個指令有不可逆的破壞性，這次不准執行。',
     infinite_loop: '同樣的錯誤又來了，你們在鬼打牆燒 Token。這次工具呼叫我擋下了，先去看邏輯。',
     architecture_violation: '這次變更偏離了 Sprint 目標。我放你過，但這筆帳記著。',
+    test_tampering: '程式沒修好，倒先把測試改弱了？Commit 已攔下。去修程式，不是修測試。',
     code_complexity: '複雜度超標，過度工程化。這次不擋，但趕快重構。',
   },
   en: {
@@ -30,6 +31,7 @@ export const personaDict: Record<Lang, Record<Signal, string>> = {
     destructive_command: 'Hold it. This command is irreversibly destructive. Not running it.',
     infinite_loop: 'Same error again. You are looping and burning tokens. This tool call is BLOCKED. Fix the logic first.',
     architecture_violation: 'This change drifts from the sprint goal. Letting it through, but I noticed.',
+    test_tampering: 'Weakening the tests instead of fixing the code? Commit BLOCKED. Fix the code, not the tests.',
     code_complexity: 'Over-engineered. Not blocking this time, but refactor it.',
   },
 };
