@@ -1,5 +1,5 @@
 node_modules/
-dist/*.test.js
+dist/
 .cto-brain.json
 .cto-brain.json.*tmp
 debug_stdin.json
