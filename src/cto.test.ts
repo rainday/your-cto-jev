@@ -10,7 +10,7 @@ import { chunkDiff, estimateTokens, filterDiff } from './diff.js';
 import { agentPost, agentPre, gitCommit } from './hooks.js';
 import { agents } from './agents.js';
 import { applyCredentials, credentialsPath, saveCredentials } from './brain.js';
-import { wizard } from './wizard.js';
+import { parsePicks, wizard } from './wizard.js';
 const claudePre = (i: any, e: any) => agentPre(agents.claude, agents.claude.parsePre(i), e);
 const claudePost = (i: any, e: any) => agentPost(agents.claude.parsePost(i), e);
 import { detectLang } from './i18n.js';
@@ -319,12 +319,27 @@ test('credentials: file fills missing env, env wins; wizard verifies and saves k
   setKeys(false);
   saveCredentials({});
   globalThis.fetch = (async () => new Response(JSON.stringify(answers({ probe: noul(0.9) })))) as any;
-  const answersQ = ['', '', 'y', 'n', 'or-key', ''];
+  // step 1: '9' invalid, '3' toggles Gemini on, Enter confirms; step 2: 'x' invalid, '1' picks OpenRouter, then the key
+  const answersQ = ['9', '3', '', 'x', '1', 'or-key'];
   const asked: string[] = [];
+  const logged: string[] = [];
   const ask = async (q: string) => { asked.push(q); return answersQ.shift() ?? ''; };
-  const chosen = await wizard(ask, 'en', ['cursor'], () => {});
-  assert.deepEqual(chosen, ['cursor', 'gemini']); // claude: Enter on undetected -> no; cursor detected default; gemini y
+  const chosen = await wizard(ask, 'en', ['cursor'], (s) => logged.push(s));
+  assert.deepEqual(chosen, ['cursor', 'gemini']);
   assert.equal(JSON.parse(readFileSync(credentialsPath(), 'utf8')).OPENROUTER_API_KEY, 'or-key');
+  const out = logged.join('\n');
+  assert.match(out, /two steps/);
+  assert.match(out, /\[ \] 1\. Claude Code/, 'whole agent checklist shown up front');
+  assert.match(out, /\[x\] 2\. Cursor \(detected\)/);
+  assert.match(out, /\[ \] 4\. Codex CLI/);
+  assert.match(out, /\[x\] 3\. Gemini CLI/, 'checklist redrawn after a toggle');
+  assert.match(out, /1\. OpenRouter[\s\S]*2\. Cloudflare Workers AI/, 'both providers listed before any key prompt');
+  assert.equal(out.match(/Did not understand/g)?.length, 2);
+  assert.ok(!asked.some((q) => /Cloudflare/.test(q)), 'unpicked provider is never asked');
+  assert.deepEqual(parsePicks('1,3', 4), [0, 2]);
+  assert.deepEqual(parsePicks('1 1', 2), [0]);
+  assert.equal(parsePicks('5', 4), null);
+  assert.equal(parsePicks('a', 4), null);
   // keys already present -> no key prompts
   const n = asked.length;
   await wizard(async () => '', 'en', [], () => {});

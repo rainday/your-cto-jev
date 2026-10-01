@@ -56,27 +56,60 @@ export function terminalAsk(): { ask: Ask; close: () => void } {
 
 const yes = (ans: string, def: boolean) => (ans ? /^y/i.test(ans) : def);
 
+/** Parse "1,3" or "1 3" into 0-based indexes; null if anything is not a number in range. */
+export function parsePicks(input: string, n: number): number[] | null {
+  const idx = input.split(/[\s,]+/).filter(Boolean).map((p) => Number(p) - 1);
+  return idx.every((i) => Number.isInteger(i) && i >= 0 && i < n) ? [...new Set(idx)] : null;
+}
+
+const PROVIDER_OPTIONS = ['openrouter', 'cloudflare'] as const;
+
 /**
- * Interactive setup: pick agents (detected ones default to yes), then enter and verify keys.
+ * Interactive setup in two announced steps. Each step shows its full checklist first, so nobody misses an option:
+ * 1. Agents: detected ones pre-checked; type numbers to toggle, Enter to confirm.
+ * 2. API providers: type numbers to pick, Enter to skip. Keys are asked only for picked providers, then verified.
  * Keys already present in env are kept as-is unless forceKeys.
  */
 export async function wizard(ask: Ask, lang: Lang, detected: AgentName[], log: (s: string) => void, forceKeys = false): Promise<AgentName[]> {
-  log(t(lang, 'wiz_agents'));
-  const chosen: AgentName[] = [];
-  for (const name of agentNames) {
-    const def = detected.includes(name);
-    const ans = await ask(t(lang, 'wiz_agent_q', { label: agents[name].label, hint: def ? 'Y/n' : 'y/N', found: def ? t(lang, 'wiz_found') : '' }));
-    if (yes(ans, def)) chosen.push(name);
-  }
+  log(t(lang, 'wiz_intro'));
 
+  // Step 1: agents checklist
+  log(t(lang, 'wiz_step_agents'));
+  const picked = new Set<AgentName>(detected);
+  for (;;) {
+    agentNames.forEach((name, i) => {
+      const box = picked.has(name) ? '[x]' : '[ ]';
+      const found = detected.includes(name) ? t(lang, 'wiz_found') : '';
+      log(`  ${box} ${i + 1}. ${agents[name].label}${found}`);
+    });
+    const ans = await ask(t(lang, 'wiz_agents_hint'));
+    if (!ans) break;
+    const idx = parsePicks(ans, agentNames.length);
+    if (!idx) { log(t(lang, 'wiz_invalid')); continue; }
+    for (const i of idx) {
+      const n = agentNames[i];
+      if (picked.has(n)) picked.delete(n); else picked.add(n);
+    }
+  }
+  const chosen = agentNames.filter((n) => picked.has(n));
+
+  // Step 2: API providers checklist
+  log(t(lang, 'wiz_step_keys'));
   const env = process.env;
   const hasKey = !!(env.OPENROUTER_API_KEY || (env.CLOUDFLARE_API_TOKEN && env.CLOUDFLARE_ACCOUNT_ID));
   if (hasKey && !forceKeys) {
     log(t(lang, 'wiz_keys_present'));
     return chosen;
   }
-
   log(t(lang, 'wiz_keys', { path: credentialsPath() }));
+  PROVIDER_OPTIONS.forEach((p, i) => log(`  ${i + 1}. ${t(lang, 'wiz_provider_' + p)}`));
+  let which: number[] | null = null;
+  while (!which) {
+    const ans = await ask(t(lang, 'wiz_providers_hint'));
+    which = ans ? parsePicks(ans, PROVIDER_OPTIONS.length) : [];
+    if (!which) log(t(lang, 'wiz_invalid'));
+  }
+
   const creds: Credentials = { ...loadCredentials() };
   const tryKey = async (provider: string, set: Credentials) => {
     const saved = { ...env };
@@ -93,12 +126,15 @@ export async function wizard(ask: Ask, lang: Lang, detected: AgentName[], log: (
     else for (const k of Object.keys(set)) { if (saved[k] === undefined) delete env[k]; else env[k] = saved[k]; }
   };
 
-  const or = await ask(t(lang, 'wiz_or_key'), true);
-  if (or) await tryKey('openrouter', { OPENROUTER_API_KEY: or });
-  const acc = await ask(t(lang, 'wiz_cf_account'));
-  if (acc) {
-    const tok = await ask(t(lang, 'wiz_cf_token'), true);
-    if (tok) await tryKey('cloudflare', { CLOUDFLARE_ACCOUNT_ID: acc, CLOUDFLARE_API_TOKEN: tok });
+  for (const i of which) {
+    if (PROVIDER_OPTIONS[i] === 'openrouter') {
+      const key = await ask(t(lang, 'wiz_or_key'), true);
+      if (key) await tryKey('openrouter', { OPENROUTER_API_KEY: key });
+    } else {
+      const acc = await ask(t(lang, 'wiz_cf_account'));
+      const tok = acc ? await ask(t(lang, 'wiz_cf_token'), true) : '';
+      if (acc && tok) await tryKey('cloudflare', { CLOUDFLARE_ACCOUNT_ID: acc, CLOUDFLARE_API_TOKEN: tok });
+    }
   }
   if (Object.keys(creds).length) log(t(lang, 'wiz_saved', { path: saveCredentials(creds) }));
   else log(t(lang, 'wiz_no_keys'));
