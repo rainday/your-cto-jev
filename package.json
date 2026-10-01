@@ -1,0 +1,47 @@
+{
+  "name": "your-cto-jev",
+  "version": "0.1.0",
+  "description": "A sharp-tongued CTO gatekeeper for AI coding agents: blocks leaked secrets in git commits and destructive shell commands in Claude Code, Cursor, Gemini CLI and Codex, using TypeSafe Jev.",
+  "keywords": [
+    "claude-code",
+    "cursor",
+    "gemini-cli",
+    "codex",
+    "git-hooks",
+    "pre-commit",
+    "secrets",
+    "ai-agents",
+    "guardrails",
+    "jev"
+  ],
+  "author": "rainday",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rainday/your-cto-jev.git"
+  },
+  "homepage": "https://github.com/rainday/your-cto-jev#readme",
+  "bugs": {
+    "url": "https://github.com/rainday/your-cto-jev/issues"
+  },
+  "type": "module",
+  "bin": {
+    "cto": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "!dist/*.test.js"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc",
+    "test": "tsc && node --test \"dist/*.test.js\""
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2"
+  }
+}

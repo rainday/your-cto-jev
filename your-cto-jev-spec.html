@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>your-cto-jev 規格文件</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 16px; line-height: 1.6; color: #333; max-width: 860px; margin: 0 auto; padding: 40px 20px; }
+        h1 { font-size: 2.1em; color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; }
+        h2 { font-size: 1.5em; color: #2563eb; margin-top: 40px; }
+        h3 { font-size: 1.15em; color: #1d4ed8; }
+        code { background-color: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; }
+        pre { background-color: #1e293b; color: #f8fafc; padding: 15px; border-radius: 8px; overflow-x: auto; font-family: monospace; font-size: 0.85em; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { border: 1px solid #e5e7eb; padding: 10px; text-align: left; vertical-align: top; }
+        th { background-color: #f9fafb; }
+        .note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; }
+    </style>
+</head>
+<body>
+    <h1>👨‍💼 your-cto-jev (cto) 規格文件</h1>
+    <p>一個毒舌但嚴格的 CTO 守門員。在 <code>git commit</code> 與 Claude Code 執行 Bash 指令前，把變更送給 TypeSafe 的 <strong>Jev</strong>（System One 決策模型）做單次多問題並行判定，依結果硬擋、警告或靜默放行。</p>
+    <p>Jev 不是 LLM：它只回傳型別化答案與機率，不產生文字。所有輸出文案來自本地靜態字典。</p>
+
+    <h2>1. 觸發點（cto setup）</h2>
+    <p><code>cto setup</code> 的 hook 設定只寫入專案層級，不修改 <code>.zshrc</code> / <code>.bashrc</code> 等 shell rc 檔。唯一的使用者層級檔案是 key 憑證檔（見 1.1）。<code>cto setup --uninstall</code> 必須精準還原以下所有變更（不刪除 <code>.cto.json</code> 與憑證檔）。</p>
+    <h3>1.1 多 agent 與互動式安裝（v1.1 新增）</h3>
+    <ul>
+      <li><strong>互動式精靈：</strong>在終端機執行 <code>cto setup</code> 時，逐一詢問要接哪些 agent（偵測到 <code>~/.claude</code>、<code>~/.cursor</code>、<code>~/.gemini</code>、<code>~/.codex</code> 者預設 yes），再詢問 key 並以一次真實請求驗證。不做圖形介面：工具本身活在終端機與 agent 裡，GUI 只會多出依賴。</li>
+      <li><strong>非互動：</strong><code>--agents claude,cursor,gemini,codex</code>、<code>--yes</code>（無 TTY 時自動等同 <code>--yes</code>，安裝偵測到的 agent，略過 key）、<code>--keys</code> 強制重設 key。</li>
+      <li><strong>憑證檔：</strong>Windows <code>%APPDATA%\your-cto-jev\credentials.json</code>，其他 <code>$XDG_CONFIG_HOME</code> 或 <code>~/.config/your-cto-jev/credentials.json</code>，權限 600。環境變數優先，憑證檔只補缺。理由：GUI 啟動的 agent 與 git client 常讀不到 <code>.zshrc</code> 匯出的變數，hook 會因此默默 fail-open。</li>
+      <li><strong>各 agent 對照（以官方文件實作，Cursor / Gemini / Codex 尚未在 agent 內實跑）：</strong>
+        <table>
+          <thead><tr><th>Agent</th><th>設定檔</th><th>指令攔截</th><th>阻擋方式</th><th>失敗紀錄</th></tr></thead>
+          <tbody>
+            <tr><td>Claude Code</td><td><code>.claude/settings.local.json</code></td><td><code>PreToolUse</code> / <code>Bash</code></td><td>exit 2 + stderr</td><td><code>PostToolUseFailure</code> 的 <code>error</code></td></tr>
+            <tr><td>Cursor</td><td><code>.cursor/hooks.json</code>（<code>version: 1</code>）</td><td><code>beforeShellExecution</code></td><td>exit 2 加 <code>{"permission":"deny","user_message","agent_message"}</code></td><td><code>postToolUseFailure</code>（<code>tool_name</code> 為 <code>Shell</code>）的 <code>error_message</code></td></tr>
+            <tr><td>Gemini CLI</td><td><code>.gemini/settings.json</code></td><td><code>BeforeTool</code> / <code>run_shell_command</code></td><td>exit 2 + stderr</td><td><code>AfterTool</code> 的 <code>tool_response.error</code>，或 <code>llmContent</code> 中非零 <code>Exit Code</code></td></tr>
+            <tr><td>Codex CLI</td><td><code>.codex/hooks.json</code>（專案需被信任）</td><td><code>PreToolUse</code> / <code>Bash</code></td><td>exit 2 + stderr</td><td>無失敗事件；<code>PostToolUse</code> 只在 <code>tool_response</code> 可見非零 exit 時記錄，否則不記錄</td></tr>
+          </tbody>
+        </table></li>
+      <li>hook 指令統一為 <code>cto --hook &lt;agent&gt;-pre</code> / <code>&lt;agent&gt;-post</code>，判定邏輯共用，各 agent 只差 stdin 解析、阻擋慣例與設定檔位置，以對照表實作。</li>
+    </ul>
+    <table>
+      <thead><tr><th>觸發點</th><th>寫入位置</th><th>指令</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td>git pre-commit</td><td><code>git rev-parse --path-format=absolute --git-path hooks</code>（已涵蓋 <code>core.hooksPath</code> 與 worktree）。若結果是 husky 自動產生的 <code>.husky/_</code>，改寫 <code>.husky/pre-commit</code>，因為 <code>.husky/_</code> 會被 husky 重建</td><td><code>git diff --cached --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ | cto --hook git-commit</code>（固定格式，不受使用者的 noprefix、color、外部 diff 設定影響）</td><td>審查 staged 程式碼</td></tr>
+        <tr><td>Claude <code>PreToolUse</code>（matcher <code>Bash</code>）</td><td><code>.claude/settings.local.json</code></td><td><code>cto --hook claude-pre</code></td><td>審查即將執行的指令</td></tr>
+        <tr><td>Claude <code>PostToolUseFailure</code>（matcher <code>Bash</code>）</td><td><code>.claude/settings.local.json</code></td><td><code>cto --hook claude-post</code></td><td>只記錄失敗輸出，不呼叫 Jev</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li><strong>安裝方式：</strong><code>cto</code> 以全域安裝（<code>npm i -g your-cto-jev</code>）。hook 內先檢查指令存在，不存在就靜默放行（例如新成員 clone 後尚未安裝），符合 fail-open，不卡 commit。</li>
+      <li><strong>pre-commit 不覆寫：</strong>以標記區塊附加，uninstall 只移除該區塊。檔案不存在時才建立並加上 <code>#!/bin/sh</code>。注意既有 hook 中途若有 <code>exit 0</code>，附加區塊不會執行，setup 需偵測並警告。
+<pre>
+# &gt;&gt;&gt; YOUR CTO JEV START &gt;&gt;&gt;
+if command -v cto &gt;/dev/null 2&gt;&amp;1; then
+  git diff --cached --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ | cto --hook git-commit || exit 1
+fi
+# &lt;&lt;&lt; YOUR CTO JEV END &lt;&lt;&lt;
+</pre></li>
+      <li><strong>Claude hooks schema</strong>（合併進既有設定，不覆寫其他 hooks）：
+<pre>
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "cto --hook claude-pre" }] }
+    ],
+    "PostToolUseFailure": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "cto --hook claude-post" }] }
+    ]
+  }
+}
+</pre></li>
+      <li><strong>Claude hook 的 stdin 是 JSON</strong>（<code>session_id</code>、<code>tool_name</code>、<code>tool_input</code> 等），不是 diff。<code>claude-pre</code> 取 <code>tool_input.command</code> 作為 state。</li>
+      <li><strong>不使用 Stop hook：</strong>依第 2 節的分流，沒有任何硬擋條件會在 Stop 發生。</li>
+      <li><strong>.gitignore：</strong>setup 附加 <code>.cto-brain.json</code> 與 <code>debug_stdin.json</code>（同樣用標記區塊，uninstall 移除）。</li>
+    </ul>
+
+    <h2>2. 判定訊號與分流</h2>
+    <p>每次觸發只送一次請求，依 hook 類型送不同題組。</p>
+    <table>
+      <thead><tr><th>訊號</th><th>型別</th><th>送出時機</th><th>行為</th><th>預設門檻</th></tr></thead>
+      <tbody>
+        <tr><td><code>credential_leak</code></td><td>noul</td><td>git-commit</td><td>硬擋 <code>exit 1</code></td><td>&gt; 0.5</td></tr>
+        <tr><td><code>destructive_command</code></td><td>noul</td><td>claude-pre</td><td>硬擋 <code>exit 2</code></td><td>&gt; 0.7</td></tr>
+        <tr><td><code>infinite_loop</code></td><td>noul</td><td>claude-pre（<code>recent_errors</code> 非空才送）</td><td>硬擋 <code>exit 2</code></td><td>&gt; 0.85</td></tr>
+        <tr><td><code>architecture_violation</code></td><td>noul</td><td>git-commit（<code>sprint_goal</code> 非空才送）</td><td>只警告 <code>exit 0</code></td><td>&gt; 0.85</td></tr>
+        <tr><td><code>code_complexity</code></td><td>score（5 級）</td><td>git-commit</td><td>只警告 <code>exit 0</code></td><td>&gt; 2（0 起算，即第 4、5 級）</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li><strong>Exit code：</strong>git hook 任何非零都會擋；Claude hook 只有 <code>exit 2</code> 會阻擋工具，<code>exit 1</code> 只是非阻擋錯誤。</li>
+      <li><strong>靜音原則：</strong>沒有任何訊號超標時完全不輸出，直接 <code>exit 0</code>。</li>
+      <li><strong>理由：</strong>架構與複雜度是主觀判斷，誤報率高。拿它們擋 commit 會逼使用者改用 <code>--no-verify</code>，連金鑰防線一起失效。</li>
+      <li>門檻存於 <code>.cto.json</code>，可依實測校準。</li>
+    </ul>
+
+    <h2>3. Jev 請求與回應格式</h2>
+    <p>以官方文件為準：<a href="https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-questions-and-answers-request">OpenRouter Decisions API</a>、<a href="https://developers.cloudflare.com/ai/models/typesafe/jev/">Cloudflare typesafe/jev</a>。<code>questions</code> 是以名稱為 key 的物件，不是陣列。</p>
+<pre>
+// src/types.ts
+export type JevQuestion =
+  | { type: 'noul'; instructions: string; criteria?: { true: string; false: string } }
+  | { type: 'score'; instructions: string; criteria: string[] }   // 有序量表；回傳 score 是 0 起算的期望值（浮點數，例如 0.96），不是整數索引
+  | { type: 'choice'; instructions: string; criteria: Record&lt;string, string&gt; };
+
+export interface JevRequest {
+  state: string;
+  questions: Record&lt;string, JevQuestion&gt;;
+  session_id?: string;   // 傳入 Claude 的 session_id 以利觀測
+}
+
+export type JevAnswer =
+  | { type: 'noul'; noul: number }
+  | { type: 'score'; score: number; confidence?: number; probabilities?: Record&lt;string, number&gt; }
+  | { type: 'choice'; choice: string; confidence?: number; probabilities?: Record&lt;string, number&gt; };
+
+export interface JevResponse {
+  model: string;
+  answers: Record&lt;string, JevAnswer&gt;;
+  usage: { input_tokens: number; output_tokens: number; cost?: number };
+}
+</pre>
+    <p>題目範例（<code>code_complexity</code>）：</p>
+<pre>
+"code_complexity": {
+  "type": "score",
+  "instructions": "Rate the maintenance cost and structural complexity of this change.",
+  "criteria": [
+    "Minimal and clean",
+    "Simple with minor noise",
+    "Acceptable complexity",
+    "Over-engineered or deeply nested",
+    "Unmaintainable"
+  ]
+}
+</pre>
+
+    <h2>4. Provider 路由</h2>
+    <p>兩個 provider 共用同一份 <code>questions</code> / <code>answers</code> schema，差異只在 URL、認證與 body 包裝。以對照表實作，新增 provider 只加一筆，不改主邏輯，也不寫 interface 空殼。</p>
+    <table>
+      <thead><tr><th>順序</th><th>Provider</th><th>環境變數</th><th>端點</th><th>模型 ID / Body</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>Cloudflare Workers AI</td><td><code>CLOUDFLARE_API_TOKEN</code>、<code>CLOUDFLARE_ACCOUNT_ID</code></td><td><code>POST https://api.cloudflare.com/client/v4/accounts/{id}/ai/run</code></td><td><code>{"model":"typesafe/jev","input":{state,questions}}</code>（<strong>不可帶 <code>session_id</code></strong>，實測回 400）</td></tr>
+        <tr><td>2</td><td>OpenRouter</td><td><code>OPENROUTER_API_KEY</code></td><td><code>POST https://openrouter.ai/api/alpha/decisions</code>（alpha）</td><td><code>{"model":"typesafe/jev-1.13",state,questions}</code></td></tr>
+      </tbody>
+    </table>
+<pre>
+// src/api.ts（結構示意）
+const providers = {
+  cloudflare: {
+    enabled: () =&gt; !!(env.CLOUDFLARE_API_TOKEN &amp;&amp; env.CLOUDFLARE_ACCOUNT_ID),
+    url: () =&gt; `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/run`,
+    headers: () =&gt; ({ Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}` }),
+    body: ({ session_id, ...input }) =&gt; ({ model: 'typesafe/jev', input }),   // Cloudflare 拒收 session_id
+  },
+  openrouter: {
+    enabled: () =&gt; !!env.OPENROUTER_API_KEY,
+    url: () =&gt; 'https://openrouter.ai/api/alpha/decisions',
+    headers: () =&gt; ({ Authorization: `Bearer ${env.OPENROUTER_API_KEY}` }),
+    body: (req) =&gt; ({ model: 'typesafe/jev-1.13', ...req }),
+  },
+};
+// evaluate(req): 依順序嘗試 enabled 且不在冷卻中的 provider，回應解析共用一份
+</pre>
+    <h3>4.1 選擇與故障轉移</h3>
+    <ul>
+      <li><code>CTO_PROVIDER</code> 指定時只用該 provider；未指定則依表中順序。</li>
+      <li>故障轉移預設開啟，<code>CTO_FAILOVER=0</code> 關閉。</li>
+      <li>每個 provider 的逾時：claude 端 2 秒、git 端 5 秒（官方延遲 &lt; 600ms）。</li>
+    </ul>
+    <table>
+      <thead><tr><th>錯誤</th><th>性質</th><th>處理</th></tr></thead>
+      <tbody>
+        <tr><td><code>401</code> / <code>402</code> / <code>403</code></td><td>持續性（key 或帳務，兩家帳號獨立）</td><td>轉移，該 provider 冷卻 1 小時</td></tr>
+        <tr><td>逾時 / <code>5xx</code> / <code>429</code></td><td>暫時性</td><td>轉移，該 provider 冷卻 5 分鐘</td></tr>
+        <tr><td><code>400</code></td><td>請求本身錯誤（兩家 schema 相同）</td><td>不轉移，直接 fail-open</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li>冷卻存於 <code>.cto-brain.json</code> 的 <code>provider_cooldown</code>。冷卻期間直接跳過，到期後自動重試主 provider，成功即切回。</li>
+      <li>冷卻時間固定，不開放設定。</li>
+    </ul>
+    <h3>4.2 Fail-open</h3>
+    <p>所有 provider 都失敗（或缺少任何 key）時放行（<code>exit 0</code>），<code>skipped_attempts</code> 加 1。只有 Jev 正常回應且明確超標才會阻擋。</p>
+    <h3>4.3 通知</h3>
+    <ul>
+      <li><strong>通道：</strong>Claude hook 的 <code>exit 0</code> 不會顯示 stderr，所以 Claude 端一律輸出 JSON <code>systemMessage</code>；git 端用 stderr。</li>
+      <li><strong>時機：</strong>只在狀態改變時通知（切走、切回、fail-open），加上每個 session 第一次告知目前使用的 provider。git 端沒有 session：狀態改變照常通知，處於降級（使用非主要 provider 或 fail-open）時每次 commit 都顯示；走主要 provider 且無超標時維持靜音（第 2 節靜音原則優先）。</li>
+      <li><strong>已知限制：</strong>Git GUI（VS Code、SourceTree、GitKraken）在 <code>exit 0</code> 時通常隱藏 stderr，軟警告對 GUI 使用者不可見。硬擋（非零 exit）仍會顯示。v1 不另寫 log 檔，README 需註明。</li>
+      <li>範例：<code>[cto] Cloudflare 額度不足 (402)，1 小時內改用 OpenRouter</code>、<code>[cto] Cloudflare 已恢復，切回主要 provider</code>。</li>
+    </ul>
+
+    <h2>5. 出口遮罩（src/masker.ts）</h2>
+    <p>所有送出的 state，以及任何寫入磁碟的錯誤內容，都要先遮罩。遮罩只是出口過濾，不是判定閘門；金鑰是否外洩仍由 Jev 依 <code>[REDACTED: type]</code> 標籤的語意判定。</p>
+<pre>
+export function maskSensitiveState(raw: string): string {
+  return raw
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED: PRIVATE_KEY_BLOCK]')
+    .replace(/\bsk_(live|test)_[A-Za-z0-9_]{16,}/g, '[REDACTED: STRIPE_KEY]')
+    .replace(/\bsk-(proj-)?[A-Za-z0-9_-]{20,}/g, '[REDACTED: OPENAI_KEY]')
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED: AWS_ACCESS_KEY]')
+    .replace(/\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}/g, '[REDACTED: GITHUB_TOKEN]')
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{22,}/g, '[REDACTED: GITHUB_PAT]')
+    .replace(/\bnpm_[A-Za-z0-9]{36,}/g, '[REDACTED: NPM_TOKEN]')
+    .replace(/\b(\w*(?:PASSWORD|SECRET|TOKEN|KEY))=\S+/gi, '$1=[REDACTED: SENSITIVE_VALUE]');
+}
+</pre>
+    <ul>
+      <li><strong>.env 檔整檔遮罩：</strong>diff 中路徑符合 <code>.env</code>、<code>.env.*</code> 的檔案，其新增、刪除與上下文行的所有 <code>NAME=value</code> 一律遮罩 value，不限變數名稱。</li>
+      <li>需附一個 assert 自我檢查，涵蓋 <code>sk_live_</code>、<code>sk-proj-</code>、<code>AKIA</code>、<code>ghp_</code>、<code>npm_</code>、私鑰區塊、<code>DB_PASSWORD=</code>、<code>.env</code> 整檔。</li>
+    </ul>
+
+    <h2>6. 大型 diff 處理</h2>
+    <ol>
+      <li><strong>過濾：</strong>排除 <code>package-lock.json</code>、<code>pnpm-lock.yaml</code>、<code>yarn.lock</code>、<code>*.min.js</code>、<code>*.map</code> 與二進位檔。</li>
+      <li><strong>分塊：</strong>單一檔案過大時按行再切，每一塊都重複該檔的 <code>diff --git</code> 標頭。超過約 24k token（英文約 4 字元 / token、CJK 約 1 字元 / token 估算）就按檔案切塊。</li>
+      <li><strong>題目分配：</strong><code>credential_leak</code> 每一塊都送，任一塊超標即擋；軟指標只送第一塊。</li>
+      <li>分塊請求並行送出，<strong>併發上限 3</strong>，避免瞬間觸發 <code>429</code>。不設分塊數量上限：金鑰檢查不抽樣。</li>
+    </ol>
+
+    <h2>7. 設定與狀態檔</h2>
+    <h3>.cto.json（進 git，團隊共用）</h3>
+<pre>
+{
+  "sprint_goal": "",
+  "thresholds": {
+    "credential_leak": 0.5,
+    "destructive_command": 0.7,
+    "infinite_loop": 0.85,
+    "architecture_violation": 0.85,
+    "code_complexity": 2
+  }
+}
+</pre>
+    <p><code>sprint_goal</code> 預設空字串，空的時候不送 <code>architecture_violation</code>。setup 結束時提示：填入 <code>sprint_goal</code> 以啟用架構對齊檢查。修改方式就是直接編輯此檔，不另做指令。語言設定不放這裡。</p>
+    <h3>.cto-brain.json（gitignore，個人執行狀態）</h3>
+<pre>
+{
+  "recent_errors": [],
+  "blocked_attempts": 0,
+  "skipped_attempts": 0,
+  "failover_count": 0,
+  "provider_cooldown": {},
+  "notified_sessions": []
+}
+</pre>
+    <ul>
+      <li><code>recent_errors</code>：由 <code>claude-post</code> 寫入，錯誤取自 stdin 頂層 <code>error</code> 字串（實測），遮罩後截斷至 500 字元，保留最近 5 筆。每筆為 <code>{command, error, at}</code>，command 同樣遮罩截斷，供 <code>infinite_loop</code> 比對。<strong>找不到錯誤欄位就不記錄</strong>，<code>is_interrupt: true</code>（使用者中斷）也不記錄。只有 15 分鐘內的錯誤會觸發 <code>infinite_loop</code>，過期紀錄在下次寫入時清除。</li>
+      <li><code>notified_sessions</code>：記錄已告知 provider 的 <code>session_id</code>，保留最近 20 筆即可。</li>
+      <li><code>debug_stdin.json</code>：只在 <code>CTO_DEBUG=1</code> 時寫入，內容先遮罩。</li>
+      <li><strong>原子寫入：</strong>Claude 可能短時間連續觸發多個 hook，<code>brain.ts</code> 寫檔一律先寫 <code>.cto-brain.json.&lt;pid&gt;.tmp</code> 再 <code>renameSync</code>（每個 process 各自的暫存檔，平行 hook 不互撞）。寫檔失敗一律吞掉，不可讓已判定的阻擋因例外變成 fail-open，避免 JSON 損壞。讀取時 parse 失敗就視為空狀態重建，不可讓機制當機。不做檔案鎖。</li>
+    </ul>
+
+    <h2>8. 語言與 Persona 字典</h2>
+    <p>CLI 所有輸出（判定訊息、通知、setup 提示與錯誤）依使用者語言輸出。v1 支援 <code>zh-TW</code> 與 <code>en</code>，文案為本地靜態字典，不呼叫 LLM 生成。</p>
+    <p><strong>語系偵測順序：</strong><code>CTO_LANG</code> &gt; <code>LC_ALL</code> / <code>LANG</code> &gt; <code>Intl.DateTimeFormat().resolvedOptions().locale</code>（Windows PowerShell 通常沒有 <code>LANG</code>，靠這層讀 OS 語系）&gt; <code>en</code>。<code>zh-*</code> 一律對應 <code>zh-TW</code>。程式碼識別字、錯誤原文與指令名稱不翻譯。</p>
+    <p>文案不得承諾與實作不符的事（例如計次、終止進程）。死循環只擋下單次工具呼叫。</p>
+<pre>
+export const personaDict = {
+  'zh-TW': {
+    credential_leak: "喂，大天才。你差點把金鑰推進 Git。Commit 已攔下，立刻拿掉。",
+    destructive_command: "停手。這個指令有不可逆的破壞性，這次不准執行。",
+    infinite_loop: "同樣的錯誤又來了，你們在鬼打牆燒 Token。這次工具呼叫我擋下了，先去看邏輯。",
+    architecture_violation: "這次變更偏離了 Sprint 目標。我放你過，但這筆帳記著。",
+    code_complexity: "複雜度超標，過度工程化。這次不擋，但趕快重構。"
+  },
+  en: {
+    credential_leak: "Nice one, genius. You almost pushed a secret into Git. Commit BLOCKED. Remove it.",
+    destructive_command: "Hold it. This command is irreversibly destructive. Not running it.",
+    infinite_loop: "Same error again. You are looping and burning tokens. This tool call is BLOCKED. Fix the logic first.",
+    architecture_violation: "This change drifts from the sprint goal. Letting it through, but I noticed.",
+    code_complexity: "Over-engineered. Not blocking this time, but refactor it."
+  }
+};
+</pre>
+    <p>彩色輸出用 Node 內建 <code>util.styleText</code>，不加 chalk 依賴。</p>
+
+    <h2>9. 環境變數一覽</h2>
+    <table>
+      <thead><tr><th>變數</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td><code>CLOUDFLARE_API_TOKEN</code>、<code>CLOUDFLARE_ACCOUNT_ID</code></td><td>Cloudflare provider（未設定時讀 1.1 的憑證檔）</td></tr>
+        <tr><td><code>OPENROUTER_API_KEY</code></td><td>OpenRouter provider</td></tr>
+        <tr><td><code>CTO_PROVIDER</code></td><td>指定 provider（<code>cloudflare</code> / <code>openrouter</code>）</td></tr>
+        <tr><td><code>CTO_FAILOVER</code></td><td><code>0</code> 關閉故障轉移</td></tr>
+        <tr><td><code>CTO_LANG</code></td><td>個人語言覆寫（<code>zh-TW</code> / <code>en</code>）</td></tr>
+        <tr><td><code>CTO_DEBUG</code></td><td><code>1</code> 寫入遮罩後的 <code>debug_stdin.json</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>10. 實測結果（2026-10-01）</h2>
+    <div class="note">
+      <p>以下為開工前實測的結果，實作已依此調整。</p>
+      <ol>
+        <li><strong>真實請求：</strong>
+          <ul>
+            <li>OpenRouter：<code>https://openrouter.ai/api/alpha/decisions</code> 回 200，延遲約 600ms（首次）。回應未包裝，另含 <code>id</code>、<code>provider</code> 欄位；score 回應另含 <code>legend</code>。官方文件列的 <code>/api/v1/api/alpha/decisions</code> 實測 404，以本文件 URL 為準。</li>
+            <li>OpenRouter 文件標示 <code>noul.criteria</code> 必填，實測省略也能回答；實作一律附上 criteria。</li>
+            <li>Cloudflare：錯誤回應有 <code>{success:false, errors:[{code,message}]}</code> 包裝；成功回應因下述 403 未能實測，文件寫無包裝，實作兩種都相容（<code>result.answers</code> 優先）。</li>
+            <li>Cloudflare 第三方模型走 AI Gateway Unified Billing：帳號預設 gateway 未開 Authenticated Gateway 時回 <code>403</code>、code <code>2049</code>（"Gateway authentication is required to use unified billing"）。屬持續性錯誤，冷卻 1 小時並轉移，與 4.1 分類一致。README 已註明前置設定。</li>
+            <li>Cloudflare 的 <code>input</code> <strong>不接受 <code>session_id</code></strong>，回 <code>400</code>（"Unsupported field passed: session_id"）。若照原 spec 傳入，Claude 端每次都 400 不轉移、直接 fail-open。已改為只對 OpenRouter 傳 <code>session_id</code>。</li>
+            <li>錯誤碼實測：無效 token 回 <code>401</code>（code 10000），缺 <code>questions</code> 回 <code>400</code>（code 7003）。</li>
+          </ul></li>
+        <li><strong><code>PostToolUseFailure</code> stdin：</strong>錯誤在頂層 <code>error</code> 字串（含 <code>Exit code N</code> 與 stdout/stderr 合併輸出），另有 <code>is_interrupt</code>、<code>duration_ms</code>、<code>tool_use_id</code>。共通欄位：<code>session_id</code>、<code>transcript_path</code>、<code>cwd</code>、<code>hook_event_name</code>、<code>tool_name</code>、<code>tool_input</code>。</li>
+        <li><strong><code>systemMessage</code>：</strong>欄位名稱為頂層 <code>systemMessage</code>（Claude Code hook 文件）。它只顯示給使用者，不進模型 context，所以模型端無法自行驗證顯示效果，需人工目測一次。<code>exit 2</code> 時 stdout JSON 被忽略，阻擋訊息走 stderr 回饋給 agent。</li>
+        <li><strong>機率分布（OpenRouter，<code>destructive_command</code>）：</strong>
+          <table>
+            <thead><tr><th>指令</th><th>noul</th></tr></thead>
+            <tbody>
+              <tr><td><code>ls -la</code>、<code>git status</code>、<code>cat package.json</code>、<code>npm test</code></td><td>0.01 至 0.02</td></tr>
+              <tr><td><code>git reset --hard HEAD~5</code></td><td>0.36</td></tr>
+              <tr><td><code>rm -rf node_modules</code>、<code>git push --force origin main</code></td><td>0.50</td></tr>
+              <tr><td><code>find . -name "*.log" -delete</code></td><td>0.79</td></tr>
+              <tr><td><code>rm -rf ~</code>、<code>DROP DATABASE prod;</code></td><td>0.94 至 0.96</td></tr>
+            </tbody>
+          </table>
+          <p>預設 0.7 擋住明確破壞、放過 <code>node_modules</code> 清理，但 <code>git push --force</code>（0.50）也會放過。若團隊要擋 force push，把門檻降到 0.45 左右。</p>
+          <p><code>credential_leak</code>：遮罩後的 <code>[REDACTED: STRIPE_KEY]</code> 在簡短 instructions 下只拿到 0.53，貼著 0.5 門檻。instructions 明講「REDACTED 標籤代表真實金鑰」並說明 <code>.env</code> 規則後，端到端實測升到 0.94；<code>process.env.X</code> 引用為 0.04、README 範例 <code>sk_test_xxx</code> 為 0.02。</p>
+          <p><code>infinite_loop</code>：同一指令連兩次同樣錯誤後重跑，得 0.95。<strong>已知風險：</strong>修正程式碼後重跑同一指令也長得一樣，Jev 看不到中間的編輯，可能誤擋。根因解是增加 <code>PostToolUse</code>（matcher <code>Edit|Write</code>）在編輯後清空 <code>recent_errors</code>；v1 未做，先靠門檻調整。</p></li>
+        <li><strong>延遲：</strong>OpenRouter 13 次請求 p50 241ms、p95 326ms，遠低於 claude 端 2 秒逾時，不需調整。整個 <code>claude-pre</code> hook（含 Node 啟動）實測約 0.5 秒。Cloudflare 因 403 未能量測成功路徑（首次 403 回應花了 2.9 秒，之後的 403 都在 2 秒內。若超過 2 秒會以逾時計，冷卻 5 分鐘而非 1 小時，仍會轉移）。</li>
+      </ol>
+    </div>
+
+    <h2>11. 給 Claude Code 的實作命令（Master Prompt）</h2>
+<pre>
+請依 your-cto-jev-spec.html 實作 your-cto-jev（指令名稱 cto），TypeScript + Node 內建 API，盡量不加依賴。
+
+0. 第 10 節的實測已完成，實作依其結果（特別是 Cloudflare 不收 session_id）。
+1. src/masker.ts：依第 5 節實作遮罩，附 assert 自我檢查。
+2. src/api.ts：依第 4 節實作 provider 對照表與 evaluate()。Cloudflare 優先、OpenRouter 次之；
+   故障轉移、逾時、冷卻、fail-open、通知規則照 4.1 到 4.3。不寫 Provider interface。
+3. src/index.ts：處理 --hook git-commit / claude-pre / claude-post。
+   git-commit 讀 stdin diff，依第 6 節過濾與分塊；claude-pre 解析 stdin JSON 取 tool_input.command；
+   claude-post 只記錄錯誤，不呼叫 Jev。依第 2 節決定題組與 exit code，無超標時完全靜音。
+4. src/brain.ts：讀寫 .cto.json 與 .cto-brain.json（第 7 節）。
+5. src/i18n.ts：依第 8 節實作語系偵測與 personaDict，CLI 所有輸出都走字典。
+6. src/setup.ts：依第 1 節寫入 pre-commit 標記區塊（先讀 core.hooksPath）、合併 Claude hooks、
+   附加 .gitignore；--uninstall 精準還原。不修改任何 shell rc 檔。
+</pre>
+</body>
+</html>
