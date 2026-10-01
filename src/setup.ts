@@ -8,9 +8,8 @@ import { t, type Lang } from './i18n.js';
 
 const START = '# >>> YOUR CTO JEV START >>>';
 const END = '# <<< YOUR CTO JEV END <<<';
-// Pin the diff format: user config (noprefix, color.diff=always, external diff, textconv) would break parsing and masking.
-export const DIFF_CMD = 'git diff --cached --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/';
-const HOOK_BODY = `if command -v cto >/dev/null 2>&1; then\n  ${DIFF_CMD} | cto --hook git-commit || exit 1\nfi\n`;
+// Keep the block minimal: all logic (including the git diff call) lives in the package, so npm update upgrades every repo.
+const HOOK_BODY = 'if command -v cto >/dev/null 2>&1; then\n  cto --hook git-commit || exit 1\nfi\n';
 const IGNORE_BODY = '.cto-brain.json\n.cto-brain.json.*tmp\ndebug_stdin.json\n';
 const OURS = (cmd?: unknown) => typeof cmd === 'string' && cmd.startsWith('cto --hook ');
 

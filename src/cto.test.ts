@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { evaluate } from './api.js';
 import { loadBrain, saveBrain } from './brain.js';
@@ -18,6 +18,7 @@ import { maskDiff, maskSensitiveState } from './masker.js';
 import { setup } from './setup.js';
 
 const loadBrainCd = (b: any) => b.provider_cooldown.cloudflare;
+process.env.CTO_NO_UPDATE_CHECK = '1'; // tests never hit the registry or write the user's cache
 const tmp = () => mkdtempSync(join(tmpdir(), 'cto-'));
 
 test('masker covers every pattern from spec section 5', () => {
@@ -333,7 +334,7 @@ test('credentials: file fills missing env, env wins; wizard verifies and saves k
 });
 
 test('review fixes: save failure keeps the block, pinned diff format, full .env masking, stale errors, chunk headers, bad shape', async () => {
-  const { DIFF_CMD } = await import('./setup.js');
+  const { stagedDiff } = await import('./hooks.js');
   setKeys();
   process.env.CTO_PROVIDER = 'openrouter';
   let sent: any;
@@ -352,9 +353,7 @@ test('review fixes: save failure keeps the block, pinned diff format, full .env 
   for (const [k, v] of [['diff.noprefix', 'true'], ['color.diff', 'always'], ['color.ui', 'always'], ['diff.mnemonicPrefix', 'true']]) g('config', k, v);
   writeFileSync(join(repo, '.env'), 'DB_URL=postgres://u:secretpw@h/db\n');
   g('add', '.env');
-  // Call git directly: no sh on PATH in PowerShell/cmd. DIFF_CMD has no quoting, so a space split is exact.
-  const [bin, ...diffArgs] = DIFF_CMD.split(' ');
-  const diff = execFileSync(bin, diffArgs, { cwd: repo, encoding: 'utf8' });
+  const diff = stagedDiff(repo);
   assert.ok(!/\x1b\[/.test(diff), 'no ANSI color');
   assert.match(diff, /^diff --git a\/\.env b\/\.env$/m);
   assert.ok(!maskDiff(diff).includes('secretpw'));
@@ -450,4 +449,52 @@ test('readHidden: no echo, backspace, bracketed paste, Ctrl+C, restores raw mode
   input.emit('data', 'abc\u0003');
   await assert.rejects(p, /aborted/);
   assert.deepEqual(input.raw, [true, false]);
+});
+
+test('updates: minimal hook block, version compare, daily cached check, notice once per session', async () => {
+  const { newer, checkUpdate, currentVersion } = await import('./update.js');
+  assert.ok(newer('0.10.0', '0.9.9') && newer('1.0.0', '0.99.99') && !newer('0.2.0', '0.2.0') && !newer('0.1.9', '0.2.0'));
+
+  // pre-commit block holds no logic, only the cto call
+  const repo = tmp();
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  setup(repo, 'en', { agents: [] });
+  const block = readFileSync(join(repo, '.git', 'hooks', 'pre-commit'), 'utf8');
+  assert.match(block, /^\s+cto --hook git-commit \|\| exit 1$/m);
+  assert.ok(!block.includes('git diff'));
+
+  const saved = { APPDATA: process.env.APPDATA, off: process.env.CTO_NO_UPDATE_CHECK };
+  process.env.APPDATA = tmp();
+  delete process.env.CTO_NO_UPDATE_CHECK;
+  let calls = 0;
+  globalThis.fetch = (async (url: string) => {
+    calls++;
+    assert.match(String(url), /registry\.npmjs\.org\/your-cto-jev\/latest/);
+    return new Response(JSON.stringify({ version: '99.0.0' }));
+  }) as any;
+  const now = Date.now();
+  assert.equal(await checkUpdate(1000, now), '99.0.0');
+  assert.equal(await checkUpdate(1000, now + 3_600_000), '99.0.0');
+  assert.equal(calls, 1, 'second check within a day uses the cache');
+  await checkUpdate(1000, now + 86_400_001);
+  assert.equal(calls, 2, 'cache expires after a day');
+  globalThis.fetch = (async () => { throw new Error('offline'); }) as any;
+  assert.equal(await checkUpdate(1000, now + 3 * 86_400_000), undefined, 'offline is silent');
+  assert.ok(/^\d+\.\d+\.\d+$/.test(currentVersion()));
+
+  // shows up inside the once-per-session notice
+  setKeys();
+  process.env.CTO_PROVIDER = 'openrouter';
+  globalThis.fetch = (async (url: string) => new Response(JSON.stringify(
+    String(url).includes('registry.npmjs.org') ? { version: '99.0.0' } : answers({ destructive_command: noul(0.01) }),
+  ))) as any;
+  const root = tmp();
+  writeFileSync(join(dirname(credentialsPath()), 'update-check.json'), '{}');
+  const out = await claudePre({ session_id: 'u1', tool_input: { command: 'ls' } }, { root, lang: 'en' });
+  assert.match(JSON.parse(out.stdout!).systemMessage, /Version 99\.0\.0 is available/);
+  const again = await claudePre({ session_id: 'u1', tool_input: { command: 'ls' } }, { root, lang: 'en' });
+  assert.equal(again.stdout, undefined, 'not repeated in the same session');
+  setKeys(false);
+  process.env.APPDATA = saved.APPDATA;
+  process.env.CTO_NO_UPDATE_CHECK = saved.off ?? '1';
 });

@@ -43,7 +43,7 @@
     <table>
       <thead><tr><th>觸發點</th><th>寫入位置</th><th>指令</th><th>用途</th></tr></thead>
       <tbody>
-        <tr><td>git pre-commit</td><td><code>git rev-parse --path-format=absolute --git-path hooks</code>（已涵蓋 <code>core.hooksPath</code> 與 worktree）。若結果是 husky 自動產生的 <code>.husky/_</code>，改寫 <code>.husky/pre-commit</code>，因為 <code>.husky/_</code> 會被 husky 重建</td><td><code>git diff --cached --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ | cto --hook git-commit</code>（固定格式，不受使用者的 noprefix、color、外部 diff 設定影響）</td><td>審查 staged 程式碼</td></tr>
+        <tr><td>git pre-commit</td><td><code>git rev-parse --path-format=absolute --git-path hooks</code>（已涵蓋 <code>core.hooksPath</code> 與 worktree）。若結果是 husky 自動產生的 <code>.husky/_</code>，改寫 <code>.husky/pre-commit</code>，因為 <code>.husky/_</code> 會被 husky 重建</td><td><code>cto --hook git-commit</code>。<code>cto</code> 自己以固定參數執行 <code>git diff --cached --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/</code>，不讀 stdin（agent 的 shell 可能給一個永不關閉的 pipe）。區塊內不放任何邏輯，套件更新即全部生效；0.1.0 的舊區塊仍會 pipe diff 進來，會被忽略，同樣生效</td><td>審查 staged 程式碼</td></tr>
         <tr><td>Claude <code>PreToolUse</code>（matcher <code>Bash</code>）</td><td><code>.claude/settings.local.json</code></td><td><code>cto --hook claude-pre</code></td><td>審查即將執行的指令</td></tr>
         <tr><td>Claude <code>PostToolUseFailure</code>（matcher <code>Bash</code>）</td><td><code>.claude/settings.local.json</code></td><td><code>cto --hook claude-post</code></td><td>只記錄失敗輸出，不呼叫 Jev</td></tr>
       </tbody>
@@ -54,7 +54,7 @@
 <pre>
 # &gt;&gt;&gt; YOUR CTO JEV START &gt;&gt;&gt;
 if command -v cto &gt;/dev/null 2&gt;&amp;1; then
-  git diff --cached --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ | cto --hook git-commit || exit 1
+  cto --hook git-commit || exit 1
 fi
 # &lt;&lt;&lt; YOUR CTO JEV END &lt;&lt;&lt;
 </pre></li>
@@ -322,6 +322,13 @@ export const personaDict = {
         <li><strong>延遲：</strong>OpenRouter 13 次請求 p50 241ms、p95 326ms，遠低於 claude 端 2 秒逾時，不需調整。整個 <code>claude-pre</code> hook（含 Node 啟動）實測約 0.5 秒。Cloudflare 因 403 未能量測成功路徑（首次 403 回應花了 2.9 秒，之後的 403 都在 2 秒內。若超過 2 秒會以逾時計，冷卻 5 分鐘而非 1 小時，仍會轉移）。</li>
       </ol>
     </div>
+
+    <h2>9.1 更新（v1.2 新增）</h2>
+    <ul>
+      <li><code>cto update</code> 執行 <code>npm install -g your-cto-jev@latest</code>。已設定的專案不需重跑 setup。</li>
+      <li>新版檢查：查 <code>registry.npmjs.org/your-cto-jev/latest</code>，結果快取在憑證檔旁的 <code>update-check.json</code>，一天最多查一次，逾時 1 秒，失敗一律靜默。只附在每個 session 第一次的通知與 <code>cto setup</code> 輸出裡，不另外產生輸出；git 端不顯示。<code>CTO_NO_UPDATE_CHECK=1</code> 關閉。</li>
+      <li><code>cto --version</code> 顯示目前版本。</li>
+    </ul>
 
     <h2>10.1 test_tampering 校準（v1.2 新增，2026-10-01）</h2>
     <div class="note">

@@ -75,7 +75,7 @@ cd your-project
 cto setup
 ```
 
-Run the same install command again to update.
+To update later, run `cto update`. Projects you already set up pick up the new version automatically: every hook only calls `cto`, and all the logic lives in the package. `cto` checks npm for a new version at most once a day and mentions it in its once-per-session notice, never on its own.
 
 `cto setup` walks you through it in the terminal:
 
@@ -180,6 +180,7 @@ Nothing else is uploaded, and nothing is logged unless you set `CTO_DEBUG=1`. Th
 | `CTO_FAILOVER=0` | Never switch providers |
 | `CTO_LANG` | `en` or `zh-TW` (default: your locale) |
 | `CTO_DEBUG=1` | Write masked hook input to `debug_stdin.json` |
+| `CTO_NO_UPDATE_CHECK=1` | Never check npm for a new version |
 
 ## Known limitations
 

@@ -86,7 +86,9 @@ const messages: Record<Lang, Record<string, Msg>> = {
     wiz_save_anyway: () => '  仍要儲存這組 key 嗎？[y/N] ',
     wiz_saved: (v) => `[cto] key 已儲存到 ${v.path}`,
     wiz_no_keys: () => '[cto] 沒有設定任何 key，cto 會全部放行，之後可執行 cto setup --keys 補上。',
-    usage: () => '用法：cto setup [--agents claude,cursor,gemini,codex] [--keys] [--yes] [--uninstall] | cto --hook <git-commit|AGENT-pre|AGENT-post>',
+    update_available: (v) => `[cto] 有新版 ${v.latest}（目前 ${v.current}），執行 cto update 更新`,
+    update_done: () => '[cto] 已更新。已設定過的專案不用重跑 cto setup。',
+    usage: () => '用法：cto update | cto --version | cto setup [--agents claude,cursor,gemini,codex] [--keys] [--yes] [--uninstall] | cto --hook <git-commit|AGENT-pre|AGENT-post>',
   },
   en: {
     reason_402: () => 'out of credits',
@@ -134,7 +136,9 @@ const messages: Record<Lang, Record<string, Msg>> = {
     wiz_save_anyway: () => '  Save this key anyway? [y/N] ',
     wiz_saved: (v) => `[cto] Keys saved to ${v.path}`,
     wiz_no_keys: () => '[cto] No key set, so cto lets everything through. Run cto setup --keys later.',
-    usage: () => 'Usage: cto setup [--agents claude,cursor,gemini,codex] [--keys] [--yes] [--uninstall] | cto --hook <git-commit|AGENT-pre|AGENT-post>',
+    update_available: (v) => `[cto] Version ${v.latest} is available (you have ${v.current}). Run cto update`,
+    update_done: () => '[cto] Updated. Projects already set up do not need cto setup again.',
+    usage: () => 'Usage: cto update | cto --version | cto setup [--agents claude,cursor,gemini,codex] [--keys] [--yes] [--uninstall] | cto --hook <git-commit|AGENT-pre|AGENT-post>',
   },
 };
 

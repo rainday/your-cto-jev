@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { styleText } from 'node:util';
+import { checkUpdate, currentVersion } from './update.js';
 import type { Agent, HookOutput, PostInput, PreInput } from './agents.js';
 import { evaluate, providerOrder, providers, type EvalResult } from './api.js';
 import { freshErrors, loadBrain, loadConfig, saveBrain, type Brain, type CtoConfig } from './brain.js';
@@ -93,6 +95,11 @@ const TESTISH =
   /^diff --git a\/.+? b\/(?:.*\/)?(?:(?:tests?|__tests__|spec)\/.*|[^/]*\.(?:test|spec)\.[cm]?[jt]sx?|test_[^/]*\.py|[^/]*_test\.(?:py|go)|[^/]*\.snap|(?:jest|vitest|karma|playwright)\.config\.[^/]*|pytest\.ini|conftest\.py|tox\.ini|package\.json)$/m;
 export const touchesTests = (diff: string) => TESTISH.test(diff);
 
+// Pinned diff format: user config (noprefix, color.diff=always, external diff, textconv) would break parsing and masking.
+export const DIFF_ARGS = ['diff', '--cached', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/'];
+export const stagedDiff = (cwd: string) =>
+  execFileSync('git', DIFF_ARGS, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+
 export interface Env { root: string; lang: Lang; now?: () => number }
 
 // ---------- git-commit ----------
@@ -150,8 +157,11 @@ export async function gitCommit(rawDiff: string, { root, lang, now }: Env): Prom
 
 // ---------- pre (Bash / shell command gate, any agent) ----------
 
-function sessionNotice(brain: Brain, sessionId: string | undefined, lang: Lang, r: EvalResult, notices: Set<string>) {
+async function sessionNotice(brain: Brain, sessionId: string | undefined, lang: Lang, r: EvalResult, notices: Set<string>) {
   if (!sessionId || brain.notified_sessions.includes(sessionId)) return;
+  // Piggyback on the once-per-session notice: at most one registry call a day, never extra noise.
+  const latest = await checkUpdate();
+  if (latest) notices.add(t(lang, 'update_available', { latest, current: currentVersion() }));
   brain.notified_sessions = [...brain.notified_sessions, sessionId].slice(-20);
   if (r.ok) notices.add(t(lang, 'using', { name: providers[r.provider].label }));
   else if (r.reason === 'no_keys') notices.add(t(lang, 'no_keys'));
@@ -178,7 +188,7 @@ export async function agentPre(agent: Agent, input: PreInput, { root, lang, now 
   const { sessionId } = input;
   const r = await evaluate({ state, questions, ...(sessionId && { session_id: sessionId }) }, { brain, lang, timeoutMs: 2000, notices, now });
   if (!r.ok) brain.skipped_attempts++;
-  sessionNotice(brain, sessionId, lang, r, notices);
+  await sessionNotice(brain, sessionId, lang, r, notices);
 
   let out: HookOutput = { code: 0, stderr: [] };
   if (r.ok) {

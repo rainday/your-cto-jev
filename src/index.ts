@@ -3,7 +3,8 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentNames, agents, type AgentName } from './agents.js';
 import { applyCredentials, findRoot } from './brain.js';
-import { agentPost, agentPre, gitCommit } from './hooks.js';
+import { agentPost, agentPre, gitCommit, stagedDiff } from './hooks.js';
+import { checkUpdate, currentVersion, runUpdate } from './update.js';
 import type { HookOutput } from './agents.js';
 import { detectLang, t } from './i18n.js';
 import { maskDiff, maskSensitiveState } from './masker.js';
@@ -25,16 +26,19 @@ function emit(out: HookOutput) {
 }
 
 async function runHook(name: string): Promise<HookOutput> {
-  const raw = await readStdin();
   const lang = detectLang();
   const debug = (root: string, text: string) => {
     if (process.env.CTO_DEBUG === '1') writeFileSync(join(root, 'debug_stdin.json'), text);
   };
   if (name === 'git-commit') {
+    // Read the staged diff ourselves with pinned args. Never touch stdin here: older hook blocks still pipe a diff
+    // (ignored, harmless), and an agent's shell may hand us a pipe that never closes.
     const root = findRoot();
-    debug(root, maskDiff(raw));
-    return gitCommit(raw, { root, lang });
+    const diff = stagedDiff(process.cwd());
+    debug(root, maskDiff(diff));
+    return gitCommit(diff, { root, lang });
   }
+  const raw = await readStdin();
   const m = /^(claude|cursor|gemini|codex)-(pre|post)$/.exec(name);
   if (!m) return { code: 0, stderr: [] };
   const agent = agents[m[1] as AgentName];
@@ -86,8 +90,15 @@ if (args[0] === '--hook' && args[1]) {
     chosen = detectAgents();
   }
   const r = setup(process.cwd(), lang, { uninstall, agents: chosen });
+  const latest = r.code ? undefined : await checkUpdate();
+  if (latest) r.lines.push(t(lang, 'update_available', { latest, current: currentVersion() }));
   (r.code ? process.stderr : process.stdout).write(r.lines.join('\n') + '\n');
   process.exitCode = r.code;
+} else if (args[0] === 'update') {
+  process.exitCode = runUpdate();
+  if (!process.exitCode) console.log(t(lang, 'update_done'));
+} else if (args[0] === '--version' || args[0] === '-v') {
+  console.log(currentVersion());
 } else {
   process.stderr.write(t(lang, 'usage') + '\n');
   process.exitCode = args.length ? 1 : 0;
