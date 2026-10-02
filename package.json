@@ -1,6 +1,6 @@
 {
   "name": "your-cto-jev",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "A sharp-tongued CTO gatekeeper for AI coding agents: blocks leaked secrets in git commits and destructive shell commands in Claude Code, Cursor, Gemini CLI and Codex, using TypeSafe Jev.",
   "keywords": [
     "claude-code",
