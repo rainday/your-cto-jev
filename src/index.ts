@@ -5,6 +5,7 @@ import { agentNames, agents, type AgentName } from './agents.js';
 import { applyCredentials, findRoot } from './brain.js';
 import { agentPost, agentPre, gitCommit, stagedDiff } from './hooks.js';
 import { checkUpdate, currentVersion, runUpdate } from './update.js';
+import { doctor } from './doctor.js';
 import type { HookOutput } from './agents.js';
 import { detectLang, t } from './i18n.js';
 import { maskDiff, maskSensitiveState } from './masker.js';
@@ -97,6 +98,10 @@ if (args[0] === '--hook' && args[1]) {
 } else if (args[0] === 'update') {
   process.exitCode = runUpdate();
   if (!process.exitCode) console.log(t(lang, 'update_done'));
+} else if (args[0] === 'doctor') {
+  const r = await doctor(process.cwd(), lang);
+  console.log(r.lines.join('\n'));
+  process.exitCode = r.code;
 } else if (args[0] === '--version' || args[0] === '-v') {
   console.log(currentVersion());
 } else {

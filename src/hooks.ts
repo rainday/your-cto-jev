@@ -100,6 +100,10 @@ export const DIFF_ARGS = ['diff', '--cached', '--no-color', '--no-ext-diff', '--
 export const stagedDiff = (cwd: string) =>
   execFileSync('git', DIFF_ARGS, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
 
+// Measured 2026-10-02: Cloudflare p50 0.9 s, p95 2.1 s, cold spikes to 3.2 s; OpenRouter p95 0.33 s.
+// A timeout means "let it through unchecked", so wait as long as the git side does rather than fail open.
+export const AGENT_TIMEOUT_MS = 5000;
+
 export interface Env { root: string; lang: Lang; now?: () => number }
 
 // ---------- git-commit ----------
@@ -186,7 +190,7 @@ export async function agentPre(agent: Agent, input: PreInput, { root, lang, now 
 
   const notices = new Set<string>();
   const { sessionId } = input;
-  const r = await evaluate({ state, questions, ...(sessionId && { session_id: sessionId }) }, { brain, lang, timeoutMs: 2000, notices, now });
+  const r = await evaluate({ state, questions, ...(sessionId && { session_id: sessionId }) }, { brain, lang, timeoutMs: AGENT_TIMEOUT_MS, notices, now });
   if (!r.ok) brain.skipped_attempts++;
   await sessionNotice(brain, sessionId, lang, r, notices);
 

@@ -75,8 +75,13 @@ async function callOnce(name: string, req: JevRequest, timeoutMs: number): Promi
       if (s === 429) return { ok: false, kind: 'transient', status: '429', reason: 'reason_429', message };
       return { ok: false, kind: 'transient', status: String(s), reason: 'reason_5xx', message };
     }
-    // Cloudflare docs say unwrapped; tolerate a {success, result} envelope anyway.
-    const out = json?.result?.answers ? json.result : json;
+    // Docs say unwrapped, but Cloudflare actually returns {success, result: {state: "Completed", result: {answers}}}
+    // (verified 2026-10-02). Walk down "result" until the answers show up.
+    let out = json;
+    for (let i = 0; i < 3 && out && !out.answers && out.result; i++) {
+      if (out.state && out.state !== 'Completed') break;
+      out = out.result;
+    }
     if (!out?.answers || typeof out.answers !== 'object') {
       return { ok: false, kind: 'transient', status: String(res.status), reason: 'reason_bad_response' };
     }

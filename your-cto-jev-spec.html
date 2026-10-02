@@ -330,6 +330,16 @@ export const personaDict = {
       <li><code>cto --version</code> 顯示目前版本。</li>
     </ul>
 
+    <h2>10.2 Cloudflare 實測更正（2026-10-02）</h2>
+    <div class="note">
+      <ul>
+        <li><strong>回應有兩層包裝：</strong>帳號開啟 Authenticated Gateway 並有額度後，成功回應是 <code>{"result":{"state":"Completed","result":{"model","answers","usage"}},"success":true}</code>，與官方文件「無包裝」不符。0.2.2 以前只拆一層，每次都判為格式錯誤而 fail-open：實際使用者的 repo 累積 91 次放行、0 次擋下。現在逐層往下找 <code>answers</code>，<code>state</code> 不是 <code>Completed</code> 時視為暫時性錯誤。</li>
+        <li><strong>延遲：</strong>12 次 p50 0.91 秒、p95 2.1 秒，冷啟動偶爾 3.2 秒以上。原本 agent 端 2 秒逾時約一成失敗放行，改為 5 秒，與 git 端一致：逾時等於不檢查，寧可偶爾慢。</li>
+        <li><strong>token 權限：</strong>只需 Account &gt; Workers AI &gt; Read；只有 AI Gateway 權限會回 401（code 10000）。</li>
+        <li><strong>新增 <code>cto doctor</code>：</strong>因為 fail-open 讓故障看起來和正常放行一樣，需要主動檢查。每個 provider 打一次真實請求並給出錯誤碼對應的修正建議，檢查目前 repo 的 hook、已接的 agent、累計擋下與未檢查放行次數、冷卻狀態；有問題時 exit 1。</li>
+      </ul>
+    </div>
+
     <h2>10.1 test_tampering 校準（v1.2 新增，2026-10-01）</h2>
     <div class="note">
       <p>偵測 agent 為了讓測試通過而削弱測試（skip、刪斷言、放寬期望、改期望值配合錯誤輸出、吞掉錯誤、降低覆蓋率門檻），而不是修程式。</p>

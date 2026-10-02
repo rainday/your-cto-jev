@@ -513,3 +513,40 @@ test('updates: minimal hook block, version compare, daily cached check, notice o
   process.env.APPDATA = saved.APPDATA;
   process.env.CTO_NO_UPDATE_CHECK = saved.off ?? '1';
 });
+
+test('Cloudflare double-wrapped response parses; doctor reports working vs broken setups', async () => {
+  // shape verified against the live API on 2026-10-02
+  setKeys();
+  process.env.CTO_PROVIDER = 'cloudflare';
+  const wrapped = { result: { state: 'Completed', result: answers({ destructive_command: noul(0.87) }) }, success: true, errors: [], messages: [] };
+  globalThis.fetch = (async () => new Response(JSON.stringify(wrapped))) as any;
+  const r = await evaluate({ state: 'rm -rf ~', questions: {} }, { brain: loadBrain(tmp()), lang: 'en', timeoutMs: 1000, notices: new Set() });
+  assert.ok(r.ok && (r.answers.destructive_command as any).noul === 0.87);
+  delete process.env.CTO_PROVIDER;
+
+  const { doctor } = await import('./doctor.js');
+  const repo = tmp();
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  setup(repo, 'en', { agents: ['claude'] });
+
+  // Cloudflare works, OpenRouter rejects the key
+  globalThis.fetch = (async (url: string) => String(url).includes('cloudflare')
+    ? new Response(JSON.stringify(wrapped))
+    : new Response(JSON.stringify({ error: { message: 'bad key' } }), { status: 401 })) as any;
+  let d = await doctor(repo, 'en');
+  let text = d.lines.join('\n');
+  assert.match(text, /OK Cloudflare \(environment\): working/);
+  assert.match(text, /!! OpenRouter .*failed \(401\)/);
+  assert.match(text, /Key invalid or revoked/);
+  assert.match(text, /OK git pre-commit installed/);
+  assert.match(text, /Agents wired up: Claude Code/);
+  assert.equal(d.code, 1, 'a broken provider is reported as needing attention');
+
+  // nothing configured anywhere
+  setKeys(false);
+  d = await doctor(tmp(), 'en');
+  text = d.lines.join('\n');
+  assert.match(text, /No working provider/);
+  assert.match(text, /Not inside a git repo/);
+  assert.equal(d.code, 1);
+});

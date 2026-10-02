@@ -92,7 +92,13 @@ Set up a Jev API key (at least one; press Enter to skip).
   OpenRouter OK
 ```
 
-Then restart your agent session so it picks up the new hooks.
+Then restart your agent session so it picks up the new hooks, and check that everything really works:
+
+```sh
+cto doctor
+```
+
+`cto doctor` sends one real request per provider, shows where each key comes from, checks the hooks in the current repo, and counts how often a check was blocked or let through unchecked. It exits non-zero when something needs attention. Run it whenever you are unsure whether `cto` is protecting you: because `cto` fails open, a broken key looks exactly like a clean pass.
 
 Other forms:
 
@@ -100,6 +106,7 @@ Other forms:
 cto setup --agents claude,cursor --yes   # non-interactive (scripts, CI)
 cto setup --keys                         # change keys later
 cto setup --uninstall                    # remove every cto hook again
+cto doctor                               # is it actually working?
 ```
 
 `setup` appends marked blocks and merges JSON. It never overwrites your existing hooks or settings, and `--uninstall` puts them back exactly as they were. It never touches your shell rc files.
@@ -186,7 +193,7 @@ Nothing else is uploaded, and nothing is logged unless you set `CTO_DEBUG=1`. Th
 
 - **Git GUIs hide warnings.** VS Code, SourceTree and GitKraken usually hide hook output when the commit succeeds, so the architecture and complexity warnings are invisible there. Blocks still show.
 - **A retry after a fix can look like a loop.** The loop check sees recent failures but not the edits you made since. Failures expire after 15 minutes. Raise `infinite_loop` if it gets in your way.
-- **Each agent shell command waits about half a second** for Node startup plus one Jev request.
+- **Each agent shell command waits for one Jev request.** OpenRouter answered in about 0.3 s in our tests, Cloudflare in about 0.9 s with occasional spikes past 3 s. Agent checks wait up to 5 s before failing open.
 
 ## Development
 
