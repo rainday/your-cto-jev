@@ -77,20 +77,19 @@ cto setup
 
 To update later, run `cto update`. Projects you already set up pick up the new version automatically: every hook only calls `cto`, and all the logic lives in the package. `cto` checks npm for a new version at most once a day and mentions it in its once-per-session notice, never on its own.
 
-`cto setup` walks you through it in the terminal:
+`cto setup` walks you through four steps with arrow keys: coding agents, Jev providers, API keys, and an optional sprint goal. Esc goes back a step. Providers are ticked in priority order, so the numbers you see are the failover order:
 
 ```text
-Which coding agents should get command interception?
-  Claude Code (detected) [Y/n]
-  Cursor (detected) [Y/n]
-  Gemini CLI [y/N]
-  Codex CLI (detected) [Y/n]
-
-Set up a Jev API key (at least one; press Enter to skip).
-  OpenRouter API key: ********
-  Verifying OpenRouter with one real request...
-  OpenRouter OK
+◆  Which Jev providers should cto use?
+│  › [1] OpenRouter   easiest, one key (openrouter.ai)
+│    [ ] TypeSafe     direct from the makers of Jev, one key
+│    [2] Cloudflare   Account ID + API token; needs Authenticated Gateway and credits
+│  Up/Down move · Space toggles, numbers are priority · Enter confirms · Esc goes back
 ```
+
+Each key is verified with one real request before it is saved. Keys you already stored are shown only by their last four characters, so you can keep them without pasting again.
+
+Run `cto setup` again any time: it opens an overview of your current setup, and you can change one item without touching the rest.
 
 Then restart your agent session so it picks up the new hooks, and check that everything really works:
 
@@ -104,7 +103,6 @@ Other forms:
 
 ```sh
 cto setup --agents claude,cursor --yes   # non-interactive (scripts, CI)
-cto setup --keys                         # change keys later
 cto setup --uninstall                    # remove every cto hook again
 cto doctor                               # is it actually working?
 ```
@@ -128,14 +126,15 @@ Codex only runs project hooks after you trust the project. Teammates who have no
 
 ## API keys
 
-You need at least one provider:
+You need at least one provider. `cto setup` lets you pick which ones to use and in what order:
 
 | Provider | Keys | Notes |
 |---|---|---|
 | [OpenRouter](https://openrouter.ai) | `OPENROUTER_API_KEY` | Easiest way to start |
-| [Cloudflare Workers AI](https://developers.cloudflare.com/ai/models/typesafe/jev/) | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Tried first when set. Your account's default AI Gateway must have **Authenticated Gateway** on and Unified Billing credits, or every call returns `403` |
+| [TypeSafe](https://docs.typesafe.ai/introduction/quickstart) | `TYPESAFE_API_KEY` | Direct from the makers of Jev. Get a key at console.typesafe.ai/keys. Pinned to `jev-1.13.0`, the version the thresholds were calibrated on. Not yet tested with a live key |
+| [Cloudflare Workers AI](https://developers.cloudflare.com/ai/models/typesafe/jev/) | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Token needs Account > Workers AI > Read. Your account's default AI Gateway must have **Authenticated Gateway** on and Unified Billing credits |
 
-If the first provider fails, `cto` switches to the next one and tells you once. It retries the first provider later. A missing key, a timeout or an outage never blocks you: `cto` fails open and lets the action through. It only blocks when Jev answers and the answer crosses a threshold.
+If the first provider fails, `cto` switches to the next one in your order and tells you once. It retries the first provider later. A missing key, a timeout or an outage never blocks you: `cto` fails open and lets the action through. It only blocks when Jev answers and the answer crosses a threshold.
 
 **Where keys live.** Environment variables win. Otherwise `cto` reads a per-user file that `setup` writes:
 

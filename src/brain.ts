@@ -74,7 +74,7 @@ export function loadBrain(root: string): Brain {
 // GUI-launched agents and git clients often do not inherit shell env vars, so keys set in .zshrc
 // never reach the hook. A per-user file outside every repo fixes that without touching rc files.
 
-export const CREDENTIAL_KEYS = ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID', 'OPENROUTER_API_KEY'] as const;
+export const CREDENTIAL_KEYS = ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID', 'OPENROUTER_API_KEY', 'TYPESAFE_API_KEY'] as const;
 export type Credentials = Partial<Record<(typeof CREDENTIAL_KEYS)[number], string>>;
 
 export function credentialsPath(env = process.env): string {
@@ -92,10 +92,38 @@ export function applyCredentials(env = process.env): void {
   for (const [k, v] of Object.entries(loadCredentials())) if (!env[k]) env[k] = v;
 }
 
+/** Replace the stored keys with exactly `c`; personal prefs in the same file are kept. */
 export function saveCredentials(c: Credentials): string {
+  const raw = readJson(credentialsPath()) ?? {};
+  for (const k of CREDENTIAL_KEYS) delete raw[k];
+  return writeUserFile({ ...raw, ...c });
+}
+
+// Personal preferences live next to the keys: they are per person, not per repo.
+export interface Prefs {
+  provider_order?: string[]; // providers to use, in failover order; absent = every provider with a key, default order
+  lang?: 'zh-TW' | 'en'; // absent = auto-detect
+}
+
+export function loadPrefs(): Prefs {
+  const raw = readJson(credentialsPath()) ?? {};
+  return {
+    ...(Array.isArray(raw.provider_order) && { provider_order: raw.provider_order.filter((p: unknown) => typeof p === 'string') }),
+    ...((raw.lang === 'zh-TW' || raw.lang === 'en') && { lang: raw.lang }),
+  };
+}
+
+export function savePrefs(p: Prefs): string {
+  const raw = readJson(credentialsPath()) ?? {};
+  delete raw.provider_order;
+  delete raw.lang;
+  return writeUserFile({ ...raw, ...p });
+}
+
+function writeUserFile(data: object): string {
   const path = credentialsPath();
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(c, null, 2) + '\n', { mode: 0o600 });
+  writeFileSync(path, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
   return path;
 }
 

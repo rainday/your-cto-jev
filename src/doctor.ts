@@ -1,17 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { agentNames, agents } from './agents.js';
+import { agents } from './agents.js';
 import { probeProvider, providers } from './api.js';
 import { loadBrain, loadConfig, loadCredentials } from './brain.js';
 import { AGENT_TIMEOUT_MS } from './hooks.js';
 import { t, type Lang } from './i18n.js';
+import { wiredAgents } from './setup.js';
 import { checkUpdate, currentVersion } from './update.js';
-
-const KEYS: Record<string, string[]> = {
-  cloudflare: ['CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN'],
-  openrouter: ['OPENROUTER_API_KEY'],
-};
 
 function hint(provider: string, status: string): string {
   if (status === '401') return provider === 'cloudflare' ? 'doc_hint_cf_401' : 'doc_hint_401';
@@ -34,12 +30,12 @@ export async function doctor(cwd: string, lang: Lang): Promise<{ code: number; l
   let working = 0;
   for (const name of Object.keys(providers)) {
     const label = providers[name].label;
-    const missing = KEYS[name].filter((k) => !process.env[k]);
+    const missing = providers[name].keys.filter((k) => !process.env[k]);
     if (missing.length) {
       L.push(`  - ${label}: ${t(lang, 'doc_not_set', { keys: missing.join(', ') })}`);
       continue;
     }
-    const fromFile = KEYS[name].every((k) => file[k] && file[k] === process.env[k]);
+    const fromFile = providers[name].keys.every((k) => file[k] && file[k] === process.env[k]);
     const source = t(lang, fromFile ? 'doc_src_file' : 'doc_src_env');
     const start = performance.now();
     const r = await probeProvider(name);
@@ -70,10 +66,7 @@ export async function doctor(cwd: string, lang: Lang): Promise<{ code: number; l
     if (hook.includes('YOUR CTO JEV START')) L.push(`  OK ${t(lang, 'doc_hook_ok', { path: hookPath })}`);
     else { L.push(`  !! ${t(lang, 'doc_hook_missing')}`); problems.push(t(lang, 'doc_hook_missing')); }
 
-    const wired = agentNames.filter((n) => {
-      const p = join(root!, agents[n].settings);
-      return existsSync(p) && readFileSync(p, 'utf8').includes('cto --hook ');
-    });
+    const wired = wiredAgents(root);
     L.push(`  ${wired.length ? 'OK' : '--'} ${t(lang, 'doc_agents', { list: wired.map((n) => agents[n].label).join(', ') || t(lang, 'doc_none') })}`);
 
     const cfg = loadConfig(root);

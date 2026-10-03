@@ -2,15 +2,16 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentNames, agents, type AgentName } from './agents.js';
-import { applyCredentials, findRoot } from './brain.js';
+import { applyCredentials, findRoot, loadConfig, loadCredentials, loadPrefs, saveCredentials, savePrefs } from './brain.js';
+import { providerOrder, providers } from './api.js';
 import { agentPost, agentPre, gitCommit, stagedDiff } from './hooks.js';
 import { checkUpdate, currentVersion, runUpdate } from './update.js';
 import { doctor } from './doctor.js';
 import type { HookOutput } from './agents.js';
 import { detectLang, t } from './i18n.js';
 import { maskDiff, maskSensitiveState } from './masker.js';
-import { detectAgents, setup } from './setup.js';
-import { terminalAsk, wizard } from './wizard.js';
+import { detectAgents, gitRoot, setSprintGoal, setup, wiredAgents } from './setup.js';
+import type { SetupState } from './setupui.js';
 
 async function readStdin(): Promise<string> {
   if (process.stdin.isTTY) return '';
@@ -76,21 +77,35 @@ if (args[0] === '--hook' && args[1]) {
 } else if (args[0] === 'setup') {
   const uninstall = args.includes('--uninstall');
   let chosen: AgentName[] | undefined;
+  let goal: string | undefined;
+  const root = gitRoot(process.cwd());
   const list = flag('--agents');
   if (list) chosen = list.split(',').map((s) => s.trim()).filter((s): s is AgentName => (agentNames as string[]).includes(s));
-  else if (!uninstall && process.stdin.isTTY && process.stdout.isTTY && !args.includes('--yes')) {
-    const { ask, close } = terminalAsk();
-    try {
-      chosen = await wizard(ask, lang, detectAgents(), (s) => console.log(s), args.includes('--keys'));
-    } catch {
-      process.exit(130); // Ctrl+C or closed input: stop quietly, nothing has been written yet
-    } finally {
-      close();
-    }
+  else if (!uninstall && root && process.stdin.isTTY && process.stdout.isTTY && !args.includes('--yes')) {
+    // Interactive: start from what is actually set up now, so re-running setup edits instead of starting over.
+    const fileKeys = loadCredentials();
+    const prefs = loadPrefs();
+    const wired = wiredAgents(root);
+    const initial: SetupState = {
+      agents: wired.length ? wired : detectAgents(),
+      providers: prefs.provider_order ?? Object.keys(providers).filter((p) => providers[p].enabled()),
+      keys: fileKeys,
+      lang: prefs.lang,
+      goal: loadConfig(root).sprint_goal,
+    };
+    const firstRun = !wired.length && !providerOrder().length;
+    const { setupUI } = await import('./setupui.js'); // clack loads only for interactive setup, never on the hook path
+    const s = await setupUI(initial, firstRun, lang, { detected: detectAgents() });
+    if (!s) process.exit(0); // quit without saving: nothing was written
+    saveCredentials(s.keys);
+    savePrefs({ provider_order: s.providers, ...(s.lang && { lang: s.lang }) });
+    chosen = s.agents;
+    goal = s.goal;
   } else if (!uninstall) {
     chosen = detectAgents();
   }
   const r = setup(process.cwd(), lang, { uninstall, agents: chosen });
+  if (!r.code && root && goal !== undefined) setSprintGoal(root, goal);
   const latest = r.code ? undefined : await checkUpdate();
   if (latest) r.lines.push(t(lang, 'update_available', { latest, current: currentVersion() }));
   (r.code ? process.stderr : process.stdout).write(r.lines.join('\n') + '\n');

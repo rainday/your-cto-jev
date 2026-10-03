@@ -1,4 +1,4 @@
-import type { Brain } from './brain.js';
+import { loadPrefs, type Brain } from './brain.js';
 import { t, type Lang } from './i18n.js';
 import { maskSensitiveState } from './masker.js';
 import type { JevAnswer, JevRequest } from './types.js';
@@ -10,6 +10,7 @@ const FIVE_MIN = 300_000;
 // One row per provider. Same questions/answers schema everywhere; only URL, auth and body wrapping differ.
 export const providers: Record<string, {
   label: string;
+  keys: string[]; // env / credential names this provider needs, in the order setup asks for them
   enabled: () => boolean;
   url: () => string;
   headers: () => Record<string, string>;
@@ -17,6 +18,7 @@ export const providers: Record<string, {
 }> = {
   cloudflare: {
     label: 'Cloudflare',
+    keys: ['CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN'],
     enabled: () => !!(env.CLOUDFLARE_API_TOKEN && env.CLOUDFLARE_ACCOUNT_ID),
     url: () => `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/run`,
     headers: () => ({ Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}` }),
@@ -25,10 +27,21 @@ export const providers: Record<string, {
   },
   openrouter: {
     label: 'OpenRouter',
+    keys: ['OPENROUTER_API_KEY'],
     enabled: () => !!env.OPENROUTER_API_KEY,
     url: () => 'https://openrouter.ai/api/alpha/decisions',
     headers: () => ({ Authorization: `Bearer ${env.OPENROUTER_API_KEY}` }),
     body: (req) => ({ model: 'typesafe/jev-1.13', ...req }),
+  },
+  // Direct from TypeSafe (docs.typesafe.ai/api). Pinned to the version our thresholds were calibrated on, as the
+  // docs advise; session_id is not a documented field, so it is not sent.
+  typesafe: {
+    label: 'TypeSafe',
+    keys: ['TYPESAFE_API_KEY'],
+    enabled: () => !!env.TYPESAFE_API_KEY,
+    url: () => 'https://api.typesafe.ai/v1/systemone',
+    headers: () => ({ Authorization: `Bearer ${env.TYPESAFE_API_KEY}` }),
+    body: ({ session_id: _, ...req }) => ({ model: 'jev-1.13.0', ...req }),
   },
 };
 
@@ -48,9 +61,13 @@ export interface EvalCtx {
   now?: () => number;
 }
 
-/** Ordered provider names honoring CTO_PROVIDER. */
+/**
+ * Providers to try, in order: CTO_PROVIDER > the order picked in setup (only those) > every provider with a key.
+ * Keys of providers left out of the picked order stay stored, so re-enabling one later needs no re-entry.
+ */
 export function providerOrder(): string[] {
-  const order = env.CTO_PROVIDER ? [env.CTO_PROVIDER] : Object.keys(providers);
+  const picked = loadPrefs().provider_order;
+  const order = env.CTO_PROVIDER ? [env.CTO_PROVIDER] : picked?.length ? picked : Object.keys(providers);
   return order.filter((n) => providers[n]?.enabled());
 }
 

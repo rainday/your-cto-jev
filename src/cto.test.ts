@@ -4,13 +4,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { evaluate } from './api.js';
+import { evaluate, providerOrder } from './api.js';
 import { loadBrain, saveBrain } from './brain.js';
 import { chunkDiff, estimateTokens, filterDiff } from './diff.js';
 import { agentPost, agentPre, gitCommit } from './hooks.js';
 import { agents } from './agents.js';
-import { applyCredentials, credentialsPath, saveCredentials } from './brain.js';
-import { parsePicks, wizard } from './wizard.js';
+import { applyCredentials, credentialsPath, loadCredentials, loadPrefs, saveCredentials, savePrefs } from './brain.js';
+import { displayWidth, setupUI } from './setupui.js';
+import { PassThrough, Writable } from 'node:stream';
 const claudePre = (i: any, e: any) => agentPre(agents.claude, agents.claude.parsePre(i), e);
 const claudePost = (i: any, e: any) => agentPost(agents.claude.parsePost(i), e);
 import { detectLang } from './i18n.js';
@@ -19,6 +20,7 @@ import { setup } from './setup.js';
 
 const loadBrainCd = (b: any) => b.provider_cooldown.cloudflare;
 process.env.CTO_NO_UPDATE_CHECK = '1'; // tests never hit the registry or write the user's cache
+process.env.APPDATA = mkdtempSync(join(tmpdir(), 'cto-home-')); // never read or write the user's real keys and prefs
 const tmp = () => mkdtempSync(join(tmpdir(), 'cto-'));
 
 test('masker covers every pattern from spec section 5', () => {
@@ -305,47 +307,103 @@ test('agent adapters: parse stdin and speak each blocking convention', () => {
   assert.equal(agents.codex.parsePost({ tool_response: 'some output' }), null);
 });
 
-test('credentials: file fills missing env, env wins; wizard verifies and saves keys', async () => {
+test('credentials and prefs share a file without clobbering each other; provider order follows prefs', () => {
   const saved = process.env.APPDATA;
   process.env.APPDATA = tmp();
   setKeys(false);
-  saveCredentials({ OPENROUTER_API_KEY: 'from-file' });
   process.env.CLOUDFLARE_API_TOKEN = 'from-env';
   saveCredentials({ OPENROUTER_API_KEY: 'from-file', CLOUDFLARE_API_TOKEN: 'file-token' });
   applyCredentials();
   assert.equal(process.env.OPENROUTER_API_KEY, 'from-file');
-  assert.equal(process.env.CLOUDFLARE_API_TOKEN, 'from-env');
+  assert.equal(process.env.CLOUDFLARE_API_TOKEN, 'from-env', 'env wins over the file');
 
-  setKeys(false);
-  saveCredentials({});
-  globalThis.fetch = (async () => new Response(JSON.stringify(answers({ probe: noul(0.9) })))) as any;
-  // step 1: '9' invalid, '3' toggles Gemini on, Enter confirms; step 2: 'x' invalid, '1' picks OpenRouter, then the key
-  const answersQ = ['9', '3', '', 'x', '1', 'or-key'];
-  const asked: string[] = [];
-  const logged: string[] = [];
-  const ask = async (q: string) => { asked.push(q); return answersQ.shift() ?? ''; };
-  const chosen = await wizard(ask, 'en', ['cursor'], (s) => logged.push(s));
-  assert.deepEqual(chosen, ['cursor', 'gemini']);
-  assert.equal(JSON.parse(readFileSync(credentialsPath(), 'utf8')).OPENROUTER_API_KEY, 'or-key');
-  const out = logged.join('\n');
-  assert.match(out, /two steps/);
-  assert.match(out, /\[ \] 1\. Claude Code/, 'whole agent checklist shown up front');
-  assert.match(out, /\[x\] 2\. Cursor \(detected\)/);
-  assert.match(out, /\[ \] 4\. Codex CLI/);
-  assert.match(out, /\[x\] 3\. Gemini CLI/, 'checklist redrawn after a toggle');
-  assert.match(out, /1\. OpenRouter[\s\S]*2\. Cloudflare Workers AI/, 'both providers listed before any key prompt');
-  assert.equal(out.match(/Did not understand/g)?.length, 2);
-  assert.ok(!asked.some((q) => /Cloudflare/.test(q)), 'unpicked provider is never asked');
-  assert.deepEqual(parsePicks('1,3', 4), [0, 2]);
-  assert.deepEqual(parsePicks('1 1', 2), [0]);
-  assert.equal(parsePicks('5', 4), null);
-  assert.equal(parsePicks('a', 4), null);
-  // keys already present -> no key prompts
-  const n = asked.length;
-  await wizard(async () => '', 'en', [], () => {});
-  assert.equal(asked.length, n);
+  savePrefs({ provider_order: ['openrouter'], lang: 'zh-TW' });
+  assert.equal(loadCredentials().OPENROUTER_API_KEY, 'from-file', 'saving prefs keeps keys');
+  saveCredentials({ OPENROUTER_API_KEY: 'k2' });
+  assert.deepEqual(loadPrefs(), { provider_order: ['openrouter'], lang: 'zh-TW' }, 'saving keys keeps prefs');
+  assert.equal(JSON.parse(readFileSync(credentialsPath(), 'utf8')).CLOUDFLARE_API_TOKEN, undefined, 'keys are replaced exactly');
+
+  // picked order decides, and providers left out are not used even with a key
+  setKeys();
+  savePrefs({ provider_order: ['openrouter'] });
+  assert.deepEqual(providerOrder(), ['openrouter']);
+  savePrefs({ provider_order: ['typesafe', 'openrouter'] });
+  assert.deepEqual(providerOrder(), ['openrouter'], 'typesafe picked but has no key: skipped');
+  process.env.TYPESAFE_API_KEY = 'ts';
+  assert.deepEqual(providerOrder(), ['typesafe', 'openrouter']);
+  savePrefs({});
+  assert.deepEqual(providerOrder(), ['cloudflare', 'openrouter', 'typesafe'], 'no prefs: every provider with a key');
+  delete process.env.TYPESAFE_API_KEY;
   setKeys(false);
   if (saved === undefined) delete process.env.APPDATA; else process.env.APPDATA = saved;
+});
+
+// ---------- interactive setup, driven by real keystrokes through clack ----------
+const KEY = { up: '\x1b[A', down: '\x1b[B', space: ' ', enter: '\r', esc: '\x1b' };
+async function drive<T>(run: (io: { input: PassThrough; output: Writable }) => Promise<T>, keys: string[]) {
+  const input = new PassThrough();
+  let out = '';
+  const output = new Writable({ write(c, _e, cb) { out += c; cb(); } });
+  const p = run({ input, output });
+  for (const k of keys) {
+    await new Promise((r) => setTimeout(r, 100)); // > clack's 50 ms escape timeout, so a lone Esc is read as Esc
+    input.write(k);
+  }
+  return { result: await p, out };
+}
+const fakeProbe = async (p: string) => (p === 'cloudflare' ? { ok: false as const, status: '403', message: 'gateway auth' } : { ok: true as const });
+
+test('setup UI, first run: walk the steps, Esc goes back, tick order is priority, failed provider can be dropped', async () => {
+  const initial = { agents: ['cursor' as const], providers: [], keys: {}, goal: '' };
+  const { result, out } = await drive((io) => setupUI(initial, true, 'en', { ...io, probe: fakeProbe, detected: ['cursor'], env: {} }), [
+    // agents: tick Gemini (3rd)
+    KEY.down, KEY.down, KEY.space, KEY.enter,
+    // providers: tick Cloudflare first, then OpenRouter
+    KEY.down, KEY.down, KEY.space, KEY.up, KEY.up, KEY.space, KEY.enter,
+    // keys: first prompt is Cloudflare's Account ID; Esc goes back to providers
+    KEY.esc,
+    // providers again: untick and retick Cloudflare so OpenRouter becomes 1
+    KEY.down, KEY.down, KEY.space, KEY.space, KEY.enter,
+    // keys: OpenRouter key, then Cloudflare account + token, which fails verification -> drop it
+    'or-key', KEY.enter, 'acc123', KEY.enter, 'cf-tok', KEY.enter, KEY.down, KEY.down, KEY.enter,
+    // sprint goal, then the overview starts on "Save and finish"
+    'ship billing', KEY.enter, KEY.enter,
+  ]);
+  assert.ok(result);
+  assert.deepEqual(result.agents, ['cursor', 'gemini']);
+  assert.deepEqual(result.providers, ['openrouter'], 'Cloudflare was dropped after failing');
+  assert.deepEqual(result.keys, { OPENROUTER_API_KEY: 'or-key' });
+  assert.equal(result.goal, 'ship billing');
+  assert.match(out, /\[1\] Cloudflare/, 'tick order shown as numbers');
+  assert.match(out, /\[2\] OpenRouter/);
+  assert.match(out, /OpenRouter → Cloudflare/, 'second pass reordered');
+  assert.match(out, /Cloudflare failed \(403\)/);
+  assert.ok(!out.includes('or-key'), 'API keys are never echoed');
+});
+
+test('setup UI, later run: change one item from the overview and keep the rest; Esc on the overview quits', async () => {
+  const initial = { agents: ['claude' as const], providers: ['openrouter'], keys: { OPENROUTER_API_KEY: 'or-key' }, goal: 'x' };
+  const { result, out } = await drive((io) => setupUI(initial, false, 'en', { ...io, probe: fakeProbe, env: {} }), [
+    // overview -> "Jev providers and API keys"
+    KEY.down, KEY.enter,
+    // add TypeSafe as #2
+    KEY.down, KEY.space, KEY.enter,
+    // OpenRouter: keep stored key; TypeSafe: enter one
+    KEY.enter, 'ts-key', KEY.enter,
+    // back on the overview: move to "Save and finish"
+    KEY.down, KEY.down, KEY.down, KEY.down, KEY.enter,
+  ]);
+  assert.ok(result);
+  assert.deepEqual(result.agents, ['claude'], 'untouched items keep their values');
+  assert.equal(result.goal, 'x');
+  assert.deepEqual(result.providers, ['openrouter', 'typesafe']);
+  assert.deepEqual(result.keys, { OPENROUTER_API_KEY: 'or-key', TYPESAFE_API_KEY: 'ts-key' });
+  assert.match(out, /Keep the current value …-key/);
+
+  const quit = await drive((io) => setupUI(initial, false, 'en', { ...io, env: {} }), [KEY.esc]);
+  assert.equal(quit.result, null);
+  const back = await drive((io) => setupUI(initial, true, 'en', { ...io, env: {} }), [KEY.esc]);
+  assert.equal(back.result, null, 'Esc on the first step of the first run quits without saving');
 });
 
 test('review fixes: save failure keeps the block, pinned diff format, full .env masking, stale errors, chunk headers, bad shape', async () => {
@@ -437,35 +495,6 @@ test('test_tampering: asked only when tests are touched, blocks above threshold'
   setKeys(false);
 });
 
-test('readHidden: no echo, backspace, bracketed paste, Ctrl+C, restores raw mode', async () => {
-  const { readHidden } = await import('./wizard.js');
-  const { EventEmitter } = await import('node:events');
-  const fakeIn = () => Object.assign(new EventEmitter(), {
-    raw: [] as boolean[],
-    setRawMode(m: boolean) { this.raw.push(m); },
-    setEncoding() {}, resume() {}, pause() {},
-  });
-  const echoed: string[] = [];
-  const out = { write: (s: string) => echoed.push(s) };
-
-  let input = fakeIn();
-  let p = readHidden('Key: ', input, out);
-  input.emit('data', 'sk-abX');
-  input.emit('data', '\u007f');
-  input.emit('data', '\x1b[200~cd\x1b[201~');
-  input.emit('data', '\r');
-  assert.equal(await p, 'sk-abcd');
-  assert.deepEqual(echoed, ['Key: ', '\n'], 'typed characters are never echoed');
-  assert.deepEqual(input.raw, [true, false]);
-  assert.equal(input.listenerCount('data'), 0);
-
-  input = fakeIn();
-  p = readHidden('Key: ', input, out);
-  input.emit('data', 'abc\u0003');
-  await assert.rejects(p, /aborted/);
-  assert.deepEqual(input.raw, [true, false]);
-});
-
 test('updates: minimal hook block, version compare, daily cached check, notice once per session', async () => {
   const { newer, checkUpdate, currentVersion } = await import('./update.js');
   assert.ok(newer('0.10.0', '0.9.9') && newer('1.0.0', '0.99.99') && !newer('0.2.0', '0.2.0') && !newer('0.1.9', '0.2.0'));
@@ -549,4 +578,11 @@ test('Cloudflare double-wrapped response parses; doctor reports working vs broke
   assert.match(text, /No working provider/);
   assert.match(text, /Not inside a git repo/);
   assert.equal(d.code, 1);
+});
+
+test('displayWidth counts CJK and full-width characters as two columns', () => {
+  assert.equal(displayWidth('Sprint goal'), 11);
+  assert.equal(displayWidth('語言'), 4);
+  assert.equal(displayWidth('Jev providers 與 API key'), 24);
+  assert.equal(displayWidth('（）'), 4);
 });

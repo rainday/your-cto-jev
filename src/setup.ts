@@ -111,7 +111,9 @@ export function setup(cwd: string, lang: Lang, opts: SetupOptions = {}): { code:
   const rel = (p: string) => relative(root, p) || p;
 
   // Validate every config file we may touch before writing anything.
-  const targets = opts.uninstall ? agentNames : (opts.agents ?? []);
+  // Install touches every agent: chosen ones get hooks, the rest lose any cto hooks (the agent list is the full desired set).
+  const targets = opts.uninstall || opts.agents ? agentNames : [];
+  const chosen = new Set(opts.uninstall ? [] : (opts.agents ?? []));
   const settings = new Map<AgentName, { path: string; json: any }>();
   for (const name of targets) {
     const path = join(root, agents[name].settings);
@@ -163,8 +165,15 @@ export function setup(cwd: string, lang: Lang, opts: SetupOptions = {}): { code:
   chmodSync(hookPath, 0o755);
   lines.push(t(lang, 'setup_hook', { path: rel(hookPath) }));
 
-  // 2. Agent hooks: merge, keep everything else.
+  // 2. Agent hooks: merge, keep everything else. Agents not chosen lose their cto hooks only.
   for (const [name, { path, json }] of settings) {
+    if (!chosen.has(name)) {
+      if (existsSync(path) && uninstallHooks(json)) {
+        writeOrRemove(path, json);
+        lines.push(t(lang, 'uninstall_agent', { label: agents[name].label, path: rel(path) }));
+      }
+      continue;
+    }
     installAgent(json, name);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(json, null, 2) + '\n');
@@ -189,4 +198,25 @@ export function setup(cwd: string, lang: Lang, opts: SetupOptions = {}): { code:
   if (!String(goal).trim()) lines.push(t(lang, 'setup_sprint'));
   lines.push(t(lang, 'setup_done'));
   return { code: 0, lines };
+}
+
+/** Agents whose config in this repo currently calls cto. */
+export function wiredAgents(root: string): AgentName[] {
+  return agentNames.filter((n) => {
+    const p = join(root, agents[n].settings);
+    return existsSync(p) && readFileSync(p, 'utf8').includes('cto --hook ');
+  });
+}
+
+/** Repo root, or undefined outside a git repo. */
+export function gitRoot(cwd: string): string | undefined {
+  try { return git(cwd, 'rev-parse', '--show-toplevel'); } catch { return undefined; }
+}
+
+/** Set sprint_goal in .cto.json, keeping everything else in the file. */
+export function setSprintGoal(root: string, goal: string): void {
+  const path = join(root, '.cto.json');
+  let cfg: any = DEFAULT_CONFIG;
+  try { cfg = JSON.parse(readFileSync(path, 'utf8')); } catch { /* create */ }
+  writeFileSync(path, JSON.stringify({ ...cfg, sprint_goal: goal }, null, 2) + '\n');
 }
