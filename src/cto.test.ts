@@ -388,17 +388,17 @@ test('setup UI, later run: change one item from the overview and keep the rest; 
     KEY.down, KEY.enter,
     // add TypeSafe as #2
     KEY.down, KEY.space, KEY.enter,
-    // OpenRouter: keep stored key; TypeSafe: enter one
-    KEY.enter, 'ts-key', KEY.enter,
+    // OpenRouter already has a key and was picked before: not asked again; TypeSafe is new: enter one
+    'ts-key', KEY.enter,
     // back on the overview: move to "Save and finish"
-    KEY.down, KEY.down, KEY.down, KEY.down, KEY.enter,
+    KEY.down, KEY.down, KEY.down, KEY.down, KEY.down, KEY.enter,
   ]);
   assert.ok(result);
   assert.deepEqual(result.agents, ['claude'], 'untouched items keep their values');
   assert.equal(result.goal, 'x');
   assert.deepEqual(result.providers, ['openrouter', 'typesafe']);
   assert.deepEqual(result.keys, { OPENROUTER_API_KEY: 'or-key', TYPESAFE_API_KEY: 'ts-key' });
-  assert.match(out, /Keep the current value …-key/);
+  assert.ok(!/OpenRouter API key/.test(out), 'an unchanged provider is not asked again');
 
   const quit = await drive((io) => setupUI(initial, false, 'en', { ...io, env: {} }), [KEY.esc]);
   assert.equal(quit.result, null);
@@ -578,6 +578,34 @@ test('Cloudflare double-wrapped response parses; doctor reports working vs broke
   assert.match(text, /No working provider/);
   assert.match(text, /Not inside a git repo/);
   assert.equal(d.code, 1);
+});
+
+test('setup UI: a digit moves a provider to that position; reorder alone asks nothing; Change API keys rotates them', async () => {
+  const okProbe = async () => ({ ok: true as const });
+  const initial = { agents: ['claude' as const], providers: ['openrouter', 'cloudflare'], keys: { OPENROUTER_API_KEY: 'or-key', CLOUDFLARE_ACCOUNT_ID: 'acc', CLOUDFLARE_API_TOKEN: 'cf-tok' }, goal: '' };
+  const reorder = await drive((io) => setupUI(initial, false, 'en', { ...io, probe: okProbe, env: {} }), [
+    KEY.down, KEY.enter, // overview -> providers
+    KEY.down, KEY.down, '1', KEY.enter, // cursor to Cloudflare, press 1
+    KEY.down, KEY.down, KEY.down, KEY.down, KEY.down, KEY.enter, // straight back on the overview -> save
+  ]);
+  assert.deepEqual(reorder.result?.providers, ['cloudflare', 'openrouter']);
+  assert.ok(!/Keep the current value|OpenRouter API key|Cloudflare Account ID/.test(reorder.out.split('Cloudflare → OpenRouter')[1] ?? ''), 'no key prompts after a pure reorder');
+
+  const pick = await drive((io) => setupUI({ ...initial, providers: ['openrouter'] }, false, 'en', { ...io, probe: okProbe, env: {} }), [
+    KEY.down, KEY.enter,
+    KEY.down, '1', KEY.enter, // TypeSafe was not ticked: pressing 1 ticks it and puts it first
+    'ts-key', KEY.enter,
+    KEY.down, KEY.down, KEY.down, KEY.down, KEY.down, KEY.enter,
+  ]);
+  assert.deepEqual(pick.result?.providers, ['typesafe', 'openrouter']);
+
+  const rotate = await drive((io) => setupUI({ ...initial, providers: ['openrouter'] }, false, 'en', { ...io, probe: okProbe, env: {} }), [
+    KEY.down, KEY.down, KEY.enter, // overview -> Change API keys
+    KEY.down, KEY.enter, 'or-new', KEY.enter, // "Enter a new one"
+    KEY.down, KEY.down, KEY.down, KEY.down, KEY.down, KEY.enter,
+  ]);
+  assert.equal(rotate.result?.keys.OPENROUTER_API_KEY, 'or-new');
+  assert.ok(!rotate.out.includes('or-new'), 'new key is not echoed');
 });
 
 test('displayWidth counts CJK and full-width characters as two columns', () => {

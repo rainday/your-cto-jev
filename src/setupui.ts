@@ -64,10 +64,17 @@ export async function setupUI(initial: SetupState, firstRun: boolean, lang: Lang
     return { ...s, providers: r };
   };
 
-  const keysStep: Step = async (s) => {
+  const hasKeys = (p: string, keys: Record<string, string | undefined>) => providers[p].keys.every((k) => keys[k] || env[k]);
+
+  /**
+   * Ask for keys. With `before` (the picks before this edit), only providers that are new or missing a key are asked;
+   * the rest are kept as they are, so changing the order alone asks nothing. Without it, every pick is asked (rotate keys).
+   */
+  const keysStepFor = (before: string[] | null): Step => async (s) => {
     const keys = { ...s.keys } as Record<string, string>;
     const kept: string[] = [];
     for (const p of s.providers) {
+      if (before && before.includes(p) && hasKeys(p, keys)) { kept.push(p); continue; }
       const label = providers[p].label;
       for (;;) {
         const candidate: Record<string, string> = {};
@@ -153,7 +160,7 @@ export async function setupUI(initial: SetupState, firstRun: boolean, lang: Lang
   intro(t(lang, 'ui_title'), io);
   if (firstRun) {
     log.info(t(lang, 'ui_first_run'), io);
-    const r = await walk([agentsStep, providersStep, keysStep, goalStep]);
+    const r = await walk([agentsStep, providersStep, keysStepFor(initial.providers), goalStep]);
     if (r === BACK) { outro(t(lang, 'ui_quit'), io); return null; }
     state = r;
   }
@@ -162,6 +169,7 @@ export async function setupUI(initial: SetupState, firstRun: boolean, lang: Lang
     const rows: [string, string, string][] = [
       ['agents', t(lang, 'ui_m_agents'), state.agents.map((n) => agents[n].label).join(', ') || t(lang, 'doc_none')],
       ['providers', t(lang, 'ui_m_providers'), state.providers.map((p, i) => `${i + 1}. ${providers[p].label}`).join('  ') || t(lang, 'doc_none')],
+      ['keys', t(lang, 'ui_m_keys'), state.providers.map((p) => { const v = providers[p].keys.map((k) => (state.keys as Record<string, string>)[k] ?? env[k]).filter(Boolean).pop(); return v ? `${providers[p].label} ${tail(v)}` : ''; }).filter(Boolean).join('  ') || t(lang, 'doc_none')],
       ['goal', t(lang, 'ui_m_goal'), state.goal || t(lang, 'ui_unset')],
       ['lang', t(lang, 'ui_m_lang'), state.lang ?? t(lang, 'ui_lang_auto')],
     ];
@@ -179,7 +187,13 @@ export async function setupUI(initial: SetupState, firstRun: boolean, lang: Lang
     });
     if (isCancel(choice) || choice === 'quit') { outro(t(lang, 'ui_quit'), io); return null; }
     if (choice === 'save') { outro(t(lang, 'ui_saved'), io); return state; }
-    const steps: Record<string, Step[]> = { agents: [agentsStep], providers: [providersStep, keysStep], goal: [goalStep], lang: [langStep] };
+    const steps: Record<string, Step[]> = {
+      agents: [agentsStep],
+      providers: [providersStep, keysStepFor(state.providers)],
+      keys: [keysStepFor(null)],
+      goal: [goalStep],
+      lang: [langStep],
+    };
     const r = await walk(steps[choice]);
     if (r !== BACK) state = r;
   }
@@ -187,7 +201,8 @@ export async function setupUI(initial: SetupState, firstRun: boolean, lang: Lang
 
 /**
  * Checkbox list whose marks are numbers: the order you tick items is their priority (failover order).
- * Up/Down move, Space toggles, Enter confirms, Esc goes back.
+ * Up/Down move, Space toggles, a digit moves the item under the cursor to that position (ticking it if needed),
+ * Enter confirms, Esc goes back.
  */
 async function orderedMultiselect(lang: Lang, io: { input?: Readable; output?: Writable }, values: string[], initial: string[]): Promise<string[] | symbol> {
   const p = new MultiSelectPrompt<{ value: string; label: string }>({
@@ -212,6 +227,14 @@ async function orderedMultiselect(lang: Lang, io: { input?: Readable; output?: W
       });
       return [`${S_STEP_ACTIVE}  ${head}`, ...rows, `${S_BAR}  ${dim(t(lang, 'ui_providers_help'))}`, S_BAR_END, ''].join('\n');
     },
+  });
+  p.on('key', (char) => {
+    const d = Number(char);
+    if (!Number.isInteger(d) || d < 1 || d > values.length) return;
+    const v = p.options[p.cursor].value;
+    const rest = (p.value ?? []).filter((x) => x !== v);
+    rest.splice(Math.min(d - 1, rest.length), 0, v);
+    p.value = rest;
   });
   return p.prompt() as Promise<string[] | symbol>;
 }

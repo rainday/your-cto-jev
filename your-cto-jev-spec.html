@@ -29,7 +29,8 @@
       <li><strong>第一次：</strong>依序走 coding agent、Jev provider、API key、sprint goal 四步，最後進入總覽。</li>
       <li><strong>之後：</strong><code>cto setup</code> 直接開總覽，內容讀自目前實際設定（repo 內已接的 agent、憑證檔、個人偏好、<code>.cto.json</code>），可單獨修改任一項，其餘保留。</li>
       <li><strong>provider 勾選順序即故障轉移順序：</strong>存於個人設定檔的 <code>provider_order</code>。只使用清單內的 provider；未列入者的 key 仍保留，重新勾選不必重貼。<code>CTO_PROVIDER</code> 仍可覆寫。</li>
-      <li><strong>key：</strong>只問已勾選 provider 的 key，已存的只顯示末四碼可直接保留；每組以一次真實請求驗證，失敗可重填、仍儲存或不使用該 provider。</li>
+      <li><strong>排序：</strong>空白鍵勾選的先後即順位；在某一項按數字鍵可直接移到該順位（未勾選者會一併勾選）。只改順序時不會再問 key。</li>
+      <li><strong>key：</strong>只問新加入或缺 key 的 provider；總覽另有「更換 API key」可替換已存的 key。已存的只顯示末四碼可直接保留；每組以一次真實請求驗證，失敗可重填、仍儲存或不使用該 provider。</li>
       <li><strong>agent 清單是完整的目標狀態：</strong>取消勾選的 agent 會被移除 cto hook。</li>
       <li>語言偏好存於個人設定檔（<code>CTO_LANG</code> 仍優先）。</li>
       <li>互動流程以 PassThrough 串流送入真實按鍵序列做自動測試。</li>

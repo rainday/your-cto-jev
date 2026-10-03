@@ -77,19 +77,19 @@ cto setup
 
 To update later, run `cto update`. Projects you already set up pick up the new version automatically: every hook only calls `cto`, and all the logic lives in the package. `cto` checks npm for a new version at most once a day and mentions it in its once-per-session notice, never on its own.
 
-`cto setup` walks you through four steps with arrow keys: coding agents, Jev providers, API keys, and an optional sprint goal. Esc goes back a step. Providers are ticked in priority order, so the numbers you see are the failover order:
+`cto setup` walks you through four steps with arrow keys: coding agents, Jev providers, API keys, and an optional sprint goal. Esc goes back a step. Providers are ticked in priority order, so the numbers you see are the failover order. Press a number to move the item under the cursor straight to that position:
 
 ```text
 ◆  Which Jev providers should cto use?
 │  › [1] OpenRouter   easiest, one key (openrouter.ai)
 │    [ ] TypeSafe     direct from the makers of Jev, one key
 │    [2] Cloudflare   Account ID + API token; needs Authenticated Gateway and credits
-│  Up/Down move · Space toggles, numbers are priority · Enter confirms · Esc goes back
+│  Up/Down move · Space toggles · a number moves the item to that position · Enter confirms · Esc goes back
 ```
 
 Each key is verified with one real request before it is saved. Keys you already stored are shown only by their last four characters, so you can keep them without pasting again.
 
-Run `cto setup` again any time: it opens an overview of your current setup, and you can change one item without touching the rest.
+Run `cto setup` again any time: it opens an overview of your current setup, and you can change one item without touching the rest. Changing only the order asks for nothing else; keys are asked only for newly added providers, and **Change API keys** in the overview replaces stored ones.
 
 Then restart your agent session so it picks up the new hooks, and check that everything really works:
 
