@@ -1,0 +1,13 @@
+# Actions are pinned to full commit SHAs (a tag like v5 can be moved to other code). Dependabot proposes upgrades
+# as pull requests, so a new version is reviewed before the release pipeline runs it.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5

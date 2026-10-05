@@ -304,8 +304,8 @@ export async function agentStop(input: StopInput, { root, lang, now }: Env): Pro
  * re-run after a fix is a new attempt, but the same error coming back across repeated fixes is still a loop, and only
  * the history shows that. Local only: no Jev call, no network. Docs/YAML edits do not count.
  */
-export function agentEdit(file: string | undefined, { root }: Env): HookOutput {
-  if (file && !isCodeFile(file)) return { code: 0, stderr: [] };
+export function agentEdit(files: string[] | undefined, { root }: Env): HookOutput {
+  if (files && !files.some(isCodeFile)) return { code: 0, stderr: [] };
   const brain = loadBrain(root);
   if (brain.recent_errors.some((e) => !e.edited_after)) {
     brain.recent_errors = brain.recent_errors.map((e) => ({ ...e, edited_after: true }));

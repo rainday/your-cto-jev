@@ -362,6 +362,15 @@ export const personaDict = {
       </ul>
     </div>
 
+    <h2>10.5 其他 agent 的改檔事件、預設順序與 CI 供應鏈（v0.5.2）</h2>
+    <div class="note">
+      <ul>
+        <li><strong>改檔事件（皆依官方文件）：</strong>Cursor <code>afterFileEdit</code>（頂層 <code>file_path</code>）；Gemini CLI <code>AfterTool</code>，工具 <code>write_file</code>、<code>replace</code>（<code>tool_input.file_path</code>）；Codex <code>PostToolUse</code>，工具 <code>apply_patch</code>（路徑沒有獨立欄位，從 patch 的 <code>*** Add/Update/Delete File:</code> 行解析）。皆執行 <code>cto --hook &lt;agent&gt;-edit</code>，與 Claude Code 相同地標記失敗紀錄，修正後重跑不再被誤判。這三家尚未在 agent 內實跑。</li>
+        <li><strong>預設 provider 順序：</strong>沒有設定順序時依實測速度：OpenRouter、TypeSafe、Cloudflare（原為 Cloudflare 優先）。已在設定選單排過序的使用者不受影響。</li>
+        <li><strong>CI 供應鏈：</strong>workflow 的 action 改為鎖定完整 commit SHA（checkout v5.1.0、setup-node v6.5.0；tag 可被改指向其他程式碼），發佈時的 npm 鎖在 11.x；加入 Dependabot 每月以 PR 提出 action 與依賴的升級，經審查才進入發佈流程。</li>
+      </ul>
+    </div>
+
     <h2>10.4 infinite_loop 重新校準與 code review 修正（2026-10-05）</h2>
     <div class="note">
       <ul>

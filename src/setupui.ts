@@ -3,7 +3,7 @@ import { S_BAR, S_BAR_END, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_SUBMIT, intro, i
 import type { Readable, Writable } from 'node:stream';
 import { styleText } from 'node:util';
 import { agentNames, agents, type AgentName } from './agents.js';
-import { probeProvider, providers } from './api.js';
+import { DEFAULT_ORDER, probeProvider, providers } from './api.js';
 import type { Credentials } from './brain.js';
 import { t, type Lang } from './i18n.js';
 
@@ -25,7 +25,7 @@ export interface UIOptions {
 
 const BACK = Symbol('back');
 type Step = (s: SetupState) => Promise<SetupState | typeof BACK>;
-const PROVIDER_ORDER = ['openrouter', 'typesafe', 'cloudflare'];
+const PROVIDER_ORDER = DEFAULT_ORDER;
 const dim = (s: string) => styleText('dim', s);
 const tail = (v: string) => `…${v.slice(-4)}`;
 /** Terminal columns: CJK and full-width characters take two. */

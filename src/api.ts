@@ -61,6 +61,10 @@ export interface EvalCtx {
   now?: () => number;
 }
 
+// Default order when nothing was ever picked: fastest measured first (OpenRouter p95 ~0.33 s; Cloudflare p50 ~0.9 s
+// with spikes past 3 s, 2026-10-02/05). TypeSafe direct sits in between until it has been measured.
+export const DEFAULT_ORDER = ['openrouter', 'typesafe', 'cloudflare'];
+
 /**
  * Providers to try, in order: CTO_PROVIDER > the order picked in setup (only those; an empty pick means none) > every
  * provider with a key when nothing was ever picked.
@@ -68,7 +72,7 @@ export interface EvalCtx {
  */
 export function providerOrder(): string[] {
   const picked = loadPrefs().provider_order;
-  const order = env.CTO_PROVIDER ? [env.CTO_PROVIDER] : picked !== undefined ? picked : Object.keys(providers);
+  const order = env.CTO_PROVIDER ? [env.CTO_PROVIDER] : picked !== undefined ? picked : DEFAULT_ORDER;
   return order.filter((n) => providers[n]?.enabled());
 }
 

@@ -4,7 +4,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentNames, agents, type AgentName } from './agents.js';
 import { applyCredentials, findRoot, loadConfig, loadCredentials, loadPrefs, saveCredentials, savePrefs } from './brain.js';
-import { providerOrder, providers } from './api.js';
+import { DEFAULT_ORDER, providerOrder, providers } from './api.js';
 import { agentEdit, agentPost, agentPre, agentStop, gitCommit, stagedDiff } from './hooks.js';
 import { checkUpdate, currentVersion, runUpdate } from './update.js';
 import { doctor } from './doctor.js';
@@ -48,8 +48,8 @@ async function runHook(name: string): Promise<HookOutput> {
   let input: any = {};
   try { input = JSON.parse(raw); } catch { /* fail-open below */ }
   if (m[2] === 'edit') {
-    const file = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path;
-    return agentEdit(typeof file === 'string' ? file : undefined, { root: findRoot(typeof input?.cwd === 'string' ? input.cwd : process.cwd()), lang });
+    const cwd = typeof input?.cwd === 'string' ? input.cwd : typeof input?.workspace_roots?.[0] === 'string' ? input.workspace_roots[0] : process.cwd();
+    return agentEdit(agent.parseEdit?.(input), { root: findRoot(cwd), lang });
   }
   if (m[2] === 'stop') {
     if (!agent.parseStop) return { code: 0, stderr: [] };
@@ -104,7 +104,7 @@ if (args[0] === '--hook' && args[1]) {
     const wired = wiredAgents(root);
     const initial: SetupState = {
       agents: wired.length ? wired : detectAgents(),
-      providers: prefs.provider_order ?? Object.keys(providers).filter((p) => providers[p].enabled()),
+      providers: prefs.provider_order ?? DEFAULT_ORDER.filter((p) => providers[p].enabled()),
       keys: fileKeys,
       lang: prefs.lang,
       goal: loadConfig(root).sprint_goal,

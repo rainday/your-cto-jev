@@ -21,6 +21,8 @@ export interface Agent {
   parsePre(i: any): PreInput;
   parsePost(i: any): PostInput | null;
   parseStop?(i: any): StopInput;
+  /** Files touched by an edit; undefined when the event does not say. */
+  parseEdit?(i: any): string[] | undefined;
   block(lines: string[]): HookOutput;
   notice(msgs: string[]): HookOutput;
 }
@@ -55,6 +57,7 @@ export const agents: Record<AgentName, Agent> = {
     post: { event: 'PostToolUseFailure', matcher: 'Bash' },
     stop: { event: 'Stop' },
     edit: { event: 'PostToolUse', matcher: 'Edit|Write|MultiEdit|NotebookEdit' },
+    parseEdit: (i) => { const p = str(i?.tool_input?.file_path) ?? str(i?.tool_input?.notebook_path); return p ? [p] : undefined; },
     parseStop: (i) => ({
       sessionId: str(i?.session_id),
       cwd: str(i?.cwd),
@@ -74,6 +77,8 @@ export const agents: Record<AgentName, Agent> = {
     style: 'cursor',
     pre: { event: 'beforeShellExecution' },
     post: { event: 'postToolUseFailure' },
+    edit: { event: 'afterFileEdit' },
+    parseEdit: (i) => { const p = str(i?.file_path); return p ? [p] : undefined; },
     parsePre: (i) => ({ command: str(i?.command), sessionId: str(i?.conversation_id), cwd: str(i?.cwd) ?? str(i?.workspace_roots?.[0]) }),
     parsePost: (i) =>
       i?.tool_name !== 'Shell' || i?.is_interrupt || !str(i?.error_message)
@@ -94,6 +99,8 @@ export const agents: Record<AgentName, Agent> = {
     style: 'nested',
     pre: { event: 'BeforeTool', matcher: 'run_shell_command' },
     post: { event: 'AfterTool', matcher: 'run_shell_command' },
+    edit: { event: 'AfterTool', matcher: 'write_file|replace' },
+    parseEdit: (i) => { const p = str(i?.tool_input?.file_path); return p ? [p] : undefined; },
     parsePre: nestedPre,
     parsePost: (i) => {
       if (i?.tool_name !== 'run_shell_command') return null;
@@ -112,6 +119,12 @@ export const agents: Record<AgentName, Agent> = {
     pre: { event: 'PreToolUse', matcher: 'Bash' },
     // Codex has no failure event; PostToolUse is recorded only when its output shows a non-zero exit.
     post: { event: 'PostToolUse', matcher: 'Bash' },
+    // Codex edits through apply_patch; the patch text names each file ("*** Update File: src/a.ts").
+    edit: { event: 'PostToolUse', matcher: 'apply_patch' },
+    parseEdit: (i) => {
+      const files = [...String(i?.tool_input?.command ?? '').matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) => m[1].trim());
+      return files.length ? files : undefined;
+    },
     note: 'note_codex_trust',
     parsePre: nestedPre,
     parsePost: (i) => {

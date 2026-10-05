@@ -146,12 +146,12 @@ The rules also tell the agent to run `cto check` before committing, and never to
 
 The git pre-commit check is always installed. It protects every agent and every human who commits from that repo.
 
-| Agent | Config written | Command gate | Loop detection |
-|---|---|---|---|
-| Claude Code | `.claude/settings.local.json` | yes | yes |
-| Cursor | `.cursor/hooks.json` | yes | yes |
-| Gemini CLI | `.gemini/settings.json` | yes | yes |
-| Codex CLI | `.codex/hooks.json` | yes | limited: Codex has no failure event |
+| Agent | Config written | Command gate | Loop detection | Knows about edits | Done check |
+|---|---|---|---|---|---|
+| Claude Code | `.claude/settings.local.json` | yes | yes | yes | yes |
+| Cursor | `.cursor/hooks.json` | yes | yes | yes (`afterFileEdit`) | not yet |
+| Gemini CLI | `.gemini/settings.json` | yes | yes | yes (`write_file`, `replace`) | not yet |
+| Codex CLI | `.codex/hooks.json` | yes | limited: Codex has no failure event | yes (`apply_patch`) | not yet |
 
 Claude Code is tested end to end inside the agent. The Cursor, Gemini CLI and Codex adapters follow each agent's official hook docs and are tested with their documented payloads, but have not been run inside those agents yet. Reports welcome.
 
@@ -167,7 +167,7 @@ You need at least one provider. `cto setup` lets you pick which ones to use and 
 | [TypeSafe](https://docs.typesafe.ai/introduction/quickstart) | `TYPESAFE_API_KEY` | Direct from the makers of Jev. Get a key at console.typesafe.ai/keys. Pinned to `jev-1.13.0`, the version the thresholds were calibrated on. Not yet tested with a live key |
 | [Cloudflare Workers AI](https://developers.cloudflare.com/ai/models/typesafe/jev/) | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Token needs Account > Workers AI > Read. Your account's default AI Gateway must have **Authenticated Gateway** on and Unified Billing credits |
 
-If the first provider fails, `cto` switches to the next one in your order and tells you once. It retries the first provider later. A missing key, a timeout or an outage never blocks you: `cto` fails open and lets the action through. It only blocks when Jev answers and the answer crosses a threshold.
+Without a picked order, the fastest measured provider goes first: OpenRouter, then TypeSafe, then Cloudflare. If the first provider fails, `cto` switches to the next one in your order and tells you once. It retries the first provider later. A missing key, a timeout or an outage never blocks you: `cto` fails open and lets the action through. It only blocks when Jev answers and the answer crosses a threshold.
 
 **Where keys live.** Environment variables win. Otherwise `cto` reads a per-user file that `setup` writes:
 

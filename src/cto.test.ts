@@ -104,6 +104,7 @@ function setKeys(on = true) {
 
 test('failover: 402 cools 1h and switches; recovery switches back; 400 does not fail over', async () => {
   setKeys();
+  savePrefs({ provider_order: ['cloudflare', 'openrouter'] }); // this test is about failover from a primary to a backup
   const root = tmp();
   const brain = loadBrain(root);
   let now = 1_000_000;
@@ -156,6 +157,7 @@ test('failover: 402 cools 1h and switches; recovery switches back; 400 does not 
   assert.deepEqual(calls, ['cloudflare']);
   setKeys(false);
   assert.deepEqual(await evaluate(req, ctx()), { ok: false, reason: 'no_keys' });
+  savePrefs({});
 });
 
 test('git-commit: leak blocks with exit 1, soft signals warn with exit 0, clean is silent', async () => {
@@ -332,7 +334,7 @@ test('credentials and prefs share a file without clobbering each other; provider
   process.env.TYPESAFE_API_KEY = 'ts';
   assert.deepEqual(providerOrder(), ['typesafe', 'openrouter']);
   savePrefs({});
-  assert.deepEqual(providerOrder(), ['cloudflare', 'openrouter', 'typesafe'], 'no prefs: every provider with a key');
+  assert.deepEqual(providerOrder(), ['openrouter', 'typesafe', 'cloudflare'], 'no prefs: every provider with a key, fastest first');
   delete process.env.TYPESAFE_API_KEY;
   setKeys(false);
   if (saved === undefined) delete process.env.APPDATA; else process.env.APPDATA = saved;
@@ -693,9 +695,9 @@ test('edits mark failures instead of erasing them; the loop fact counts repeats 
   await claudePre({ session_id: 'L', tool_input: { command: 'npm test' } }, env);
   assert.match(sent.state, /failed 1 time\(s\) recently; its latest error has now appeared 1 time\(s\) in a row; the agent has not edited/);
 
-  agentEdit('README.md', env);
+  agentEdit(['README.md'], env);
   assert.ok(!loadBrain(root).recent_errors[0].edited_after, 'docs edits do not count as a fix attempt');
-  agentEdit(join('src', 'cart.ts'), env);
+  agentEdit([join('src', 'cart.ts')], env);
   assert.equal(loadBrain(root).recent_errors.length, 1, 'failures are kept');
   await claudePre({ session_id: 'L', tool_input: { command: 'npm test' } }, env);
   assert.match(sent.state, /\(the agent edited code after this failure\)/);
@@ -703,7 +705,7 @@ test('edits mark failures instead of erasing them; the loop fact counts repeats 
 
   // same error again after the edit, edit again: the streak shows it is a repeated failed fix
   fail();
-  agentEdit(join('src', 'cart.ts'), env);
+  agentEdit([join('src', 'cart.ts')], env);
   await claudePre({ session_id: 'L', tool_input: { command: 'npm test' } }, env);
   assert.match(sent.state, /failed 2 time\(s\) recently; its latest error has now appeared 2 time\(s\) in a row; the agent has edited code/);
   assert.match(loopFact('npm run build', loadBrain(root).recent_errors), /none of the recent failures were this exact command/);
@@ -923,4 +925,33 @@ test('doctor: a slow backup is a note, a slow primary is a problem; rules ignore
   assert.ok(!/is ignored by \.gitignore/.test(text), 'tracked after git add -f: no longer flagged');
   savePrefs({});
   setKeys(false);
+});
+
+test('edit hooks for every agent: each payload yields the edited files, and setup wires them in each format', async () => {
+  const { agentEdit } = await import('./hooks.js');
+  assert.deepEqual(agents.claude.parseEdit!({ tool_input: { file_path: 'src/a.ts' } }), ['src/a.ts']);
+  assert.deepEqual(agents.cursor.parseEdit!({ file_path: '/r/src/a.ts', edits: [] }), ['/r/src/a.ts']);
+  assert.deepEqual(agents.gemini.parseEdit!({ tool_name: 'replace', tool_input: { file_path: 'src/a.ts' } }), ['src/a.ts']);
+  const patch = '*** Begin Patch\n*** Update File: src/cart.ts\n@@\n-a\n+b\n*** Add File: docs/notes.md\n+hi\n*** End Patch';
+  assert.deepEqual(agents.codex.parseEdit!({ tool_name: 'apply_patch', tool_input: { command: patch } }), ['src/cart.ts', 'docs/notes.md']);
+  assert.equal(agents.codex.parseEdit!({ tool_input: { command: 'not a patch' } }), undefined);
+
+  // a Codex patch touching code marks earlier failures; a docs-only patch does not
+  const root = tmp();
+  const env = { root, lang: 'en' as const };
+  claudePost({ tool_input: { command: 'npm test' }, error: 'Exit code 1\nx' }, env);
+  agentEdit(agents.codex.parseEdit!({ tool_input: { command: '*** Begin Patch\n*** Update File: README.md\n*** End Patch' } }), env);
+  assert.ok(!loadBrain(root).recent_errors[0].edited_after);
+  agentEdit(agents.codex.parseEdit!({ tool_input: { command: patch } }), env);
+  assert.ok(loadBrain(root).recent_errors[0].edited_after);
+
+  const repo = tmp();
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  setup(repo, 'en', { agents: ['cursor', 'gemini', 'codex'] });
+  const read = (p: string) => JSON.parse(readFileSync(join(repo, p), 'utf8'));
+  assert.deepEqual(read('.cursor/hooks.json').hooks.afterFileEdit, [{ command: 'cto --hook cursor-edit' }]);
+  assert.ok(read('.gemini/settings.json').hooks.AfterTool.some((m: any) => m.matcher === 'write_file|replace' && m.hooks[0].command === 'cto --hook gemini-edit'));
+  assert.ok(read('.codex/hooks.json').hooks.PostToolUse.some((m: any) => m.matcher === 'apply_patch' && m.hooks[0].command === 'cto --hook codex-edit'));
+  setup(repo, 'en', { uninstall: true });
+  for (const d of ['.cursor', '.gemini', '.codex']) assert.ok(!existsSync(join(repo, d)), d);
 });
