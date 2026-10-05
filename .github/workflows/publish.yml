@@ -1,0 +1,37 @@
+name: Publish
+
+# Release: `npm version patch|minor|major`, then `git push --follow-tags`.
+# Publishes with npm Trusted Publishing (OIDC): no npm token is stored anywhere, provenance is attached automatically.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - name: npm >= 11.5.1 for trusted publishing
+        run: npm install -g npm@latest
+      - run: npm ci
+      - name: Tag must match package.json
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then echo "Tag $GITHUB_REF_NAME does not match package.json version $v"; exit 1; fi
+      - name: Skip versions already on npm
+        id: check
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          if npm view "your-cto-jev@$v" version >/dev/null 2>&1; then echo "your-cto-jev@$v is already published"; echo "skip=true" >> "$GITHUB_OUTPUT"; fi
+      # prepublishOnly rebuilds dist and runs the full test suite before anything is uploaded.
+      - if: steps.check.outputs.skip != 'true'
+        run: npm publish

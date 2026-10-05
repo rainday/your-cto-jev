@@ -208,6 +208,13 @@ npm install
 npm test
 ```
 
+Releases are published by GitHub Actions with npm Trusted Publishing, so no npm token exists anywhere:
+
+```sh
+npm version patch        # or minor / major: bumps package.json, commits, tags
+git push --follow-tags   # the tag triggers .github/workflows/publish.yml
+```
+
 The full design, including the measured results behind the defaults, is in [`your-cto-jev-spec.html`](./your-cto-jev-spec.html) (written in 繁體中文).
 
 ## License
