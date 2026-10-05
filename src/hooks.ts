@@ -3,6 +3,7 @@ import { styleText } from 'node:util';
 import { checkUpdate, currentVersion } from './update.js';
 import type { Agent, HookOutput, PostInput, PreInput, StopInput } from './agents.js';
 import { isCodeFile, turnActions, turnState } from './turn.js';
+import { shellWrites } from './shellwrites.js';
 import { evaluate, providerOrder, providers, type EvalResult } from './api.js';
 import { freshErrors, loadBrain, loadConfig, saveBrain, type Brain, type CtoConfig, type RecentError } from './brain.js';
 import { chunkDiff, filterDiff, pool } from './diff.js';
@@ -228,6 +229,12 @@ export async function agentPre(agent: Agent, input: PreInput, { root, lang, now 
   const brain = loadBrain(root);
   const questions: Record<string, JevQuestion> = { destructive_command: Q.destructive_command };
   let state = maskSensitiveState(command);
+  // A command that writes code files (sed -i, redirects, formatters) is a fix attempt, same as an edit tool. Marked
+  // before it runs: pre hooks exist for every agent, so this also covers agents without a usable edit event.
+  const written = shellWrites(command);
+  if (written.length && (written.includes('?') || written.some(isCodeFile)) && brain.recent_errors.some((e) => !e.edited_after)) {
+    brain.recent_errors = brain.recent_errors.map((e) => ({ ...e, edited_after: true }));
+  }
   const recent = freshErrors(brain, (now ?? Date.now)());
   // One block per loop episode: once warned about the latest failure, the next attempt may run (it may be the real fix).
   // A new failure after that is unwarned again and can be blocked again.

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { relative } from 'node:path';
 import { maskSensitiveState } from './masker.js';
+import { shellWrites } from './shellwrites.js';
 
 // Reads a Claude Code transcript (JSONL) and summarises the current turn for the end-of-turn "done?" check.
 
@@ -62,7 +63,11 @@ export function turnActions(transcriptPath: string, cwd?: string): Action[] {
       } else if (b.name === 'Bash' || b.name === 'PowerShell') {
         const r = results.get(b.id);
         if (!r) continue; // not finished (or transcript lagging): no evidence either way
-        actions.push({ kind: 'run', command: String(b.input?.command ?? ''), ok: r.ok, tail: r.text });
+        const command = String(b.input?.command ?? '');
+        // A successful shell command that writes files is an edit too (sed -i, redirects, formatters). Listed before
+        // the run itself, since in "sed -i ... && npm test" the write happens before the test.
+        if (r.ok) for (const f of shellWrites(command)) actions.push({ kind: 'edit', file: f === '?' ? `(files written by: ${oneLine(command, 60)})` : f });
+        actions.push({ kind: 'run', command, ok: r.ok, tail: r.text });
       }
     }
   }

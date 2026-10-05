@@ -955,3 +955,45 @@ test('edit hooks for every agent: each payload yields the edited files, and setu
   setup(repo, 'en', { uninstall: true });
   for (const d of ['.cursor', '.gemini', '.codex']) assert.ok(!existsSync(join(repo, d)), d);
 });
+
+test('shell edits count as edits: sed -i, redirects, tee, cp/mv/rm, formatters; not 2>&1 or /dev/null', async () => {
+  const { shellWrites } = await import('./shellwrites.js');
+  const cases: [string, string[]][] = [
+    ['sed -i "s/a/b/" src/cart.ts', ['src/cart.ts']], ['sed -i.bak -e s/a/b/ src/x.py', ['src/x.py']],
+    ['perl -pi -e s/a/b/ lib/a.pm', ['lib/a.pm']], ['echo hi > src/gen.ts', ['src/gen.ts']],
+    ['cat >> README.md <<EOF', ['README.md']], ['echo x | tee src/a.ts', ['src/a.ts']],
+    ['cp src/a.ts src/b.ts', ['src/b.ts']], ['mv old.ts new.ts', ['new.ts']], ['rm -f src/dead.ts', ['src/dead.ts']],
+    ['npx prettier --write .', ['?']], ['npx eslint --fix src', ['?']], ['git apply fix.patch', ['?']],
+    ['npm test 2>&1 | tail -5', []], ['npm test > /dev/null', []], ['ls -la', []], ['git status', []],
+    ['grep -n foo src/a.ts', []], ['npm run build && npm test', []], ['cargo test 2>err.log', []],
+  ];
+  for (const [cmd, want] of cases) assert.deepEqual(shellWrites(cmd), want, cmd);
+
+  // loop detection: a sed -i before the retry is a fix attempt
+  setKeys();
+  process.env.CTO_PROVIDER = 'openrouter';
+  let sent: any;
+  globalThis.fetch = (async (_u: string, init: any) => { sent = JSON.parse(init.body); return new Response(JSON.stringify(answers({ destructive_command: noul(0.01), infinite_loop: noul(0.1) }))); }) as any;
+  const root = tmp();
+  const env = { root, lang: 'en' as const };
+  claudePost({ tool_input: { command: 'npm test' }, error: 'Exit code 1\nexpected 180' }, env);
+  await claudePre({ session_id: 'S', tool_input: { command: "sed -i 's/100/1/' src/cart.ts" } }, env);
+  assert.ok(loadBrain(root).recent_errors[0].edited_after, 'sed -i marks the failure');
+  await claudePre({ session_id: 'S', tool_input: { command: 'npm test' } }, env);
+  assert.match(sent.state, /the agent has edited code since the most recent failure/);
+  setKeys(false);
+
+  // done check: a turn that only edited through the shell is checked, and the order is right
+  const { turnActions, turnState } = await import('./turn.js');
+  const dir = tmp();
+  const L = (o: unknown) => JSON.stringify(o);
+  const p = join(dir, 't.jsonl');
+  writeFileSync(p, [
+    L({ type: 'user', message: { role: 'user', content: 'fix it' } }),
+    L({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 's1', name: 'Bash', input: { command: "sed -i 's/a/b/' src/a.ts && npm test" } }] } }),
+    L({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 's1', content: 'Tests: 3 passed', is_error: false }] } }),
+  ].join('\n'));
+  const acts = turnActions(p, dir);
+  assert.deepEqual(acts.map((a) => a.kind), ['edit', 'run'], 'the write is listed before the run that contains it');
+  assert.match(turnState('Done', acts), /Commands that ran after the last code edit: sed -i/);
+});
