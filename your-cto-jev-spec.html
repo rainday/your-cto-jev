@@ -96,7 +96,7 @@ fi
       <tbody>
         <tr><td><code>credential_leak</code></td><td>noul</td><td>git-commit</td><td>硬擋 <code>exit 1</code></td><td>&gt; 0.5</td></tr>
         <tr><td><code>destructive_command</code></td><td>noul</td><td>claude-pre</td><td>硬擋 <code>exit 2</code></td><td>&gt; 0.7</td></tr>
-        <tr><td><code>infinite_loop</code></td><td>noul</td><td>claude-pre（<code>recent_errors</code> 非空才送）</td><td>硬擋 <code>exit 2</code></td><td>&gt; 0.85</td></tr>
+        <tr><td><code>infinite_loop</code></td><td>noul</td><td>claude-pre（<code>recent_errors</code> 非空、且最近一筆尚未警告過才送）</td><td>硬擋 <code>exit 2</code>；同一段循環只擋一次</td><td>&gt; 0.6（v0.4.3 起，原 0.85）</td></tr>
         <tr><td><code>test_tampering</code></td><td>noul</td><td>git-commit（chunk 碰到測試檔、snapshot、測試設定或 <code>package.json</code> 才送）</td><td>硬擋 <code>exit 1</code></td><td>&gt; 0.8</td></tr>
         <tr><td><code>done_unverified</code></td><td>noul</td><td>claude-stop（這一輪用編輯工具改過程式碼才送；只改文件、YAML、<code>.github/</code> 不送）</td><td>擋下收工 <code>exit 2</code>，agent 繼續工作；<code>stop_hook_active</code> 為 true 時不再擋，避免迴圈</td><td>&gt; 0.6</td></tr>
         <tr><td><code>architecture_violation</code></td><td>noul</td><td>git-commit（<code>sprint_goal</code> 非空才送）</td><td>只警告 <code>exit 0</code></td><td>&gt; 0.85</td></tr>
@@ -243,7 +243,7 @@ export function maskSensitiveState(raw: string): string {
   "thresholds": {
     "credential_leak": 0.5,
     "destructive_command": 0.7,
-    "infinite_loop": 0.85,
+    "infinite_loop": 0.6,
     "architecture_violation": 0.85,
     "code_complexity": 2
   }
@@ -352,6 +352,18 @@ export const personaDict = {
         <li><strong>延遲：</strong>12 次 p50 0.91 秒、p95 2.1 秒，冷啟動偶爾 3.2 秒以上。原本 agent 端 2 秒逾時約一成失敗放行，改為 5 秒，與 git 端一致：逾時等於不檢查，寧可偶爾慢。</li>
         <li><strong>token 權限：</strong>只需 Account &gt; Workers AI &gt; Read；只有 AI Gateway 權限會回 401（code 10000）。</li>
         <li><strong>新增 <code>cto doctor</code>：</strong>因為 fail-open 讓故障看起來和正常放行一樣，需要主動檢查。每個 provider 打一次真實請求並給出錯誤碼對應的修正建議，檢查目前 repo 的 hook、已接的 agent、累計擋下與未檢查放行次數、冷卻狀態；有問題時 exit 1。</li>
+      </ul>
+    </div>
+
+    <h2>10.4 infinite_loop 重新校準與 code review 修正（2026-10-05）</h2>
+    <div class="note">
+      <ul>
+        <li><strong>改檔不再清空失敗紀錄：</strong>原先改檔就清空 <code>recent_errors</code>，會讓「改、跑、同樣錯」的典型循環永遠抓不到。改為保留並標記 <code>edited_after</code>（只算程式碼檔，文件與 YAML 不算），Jev 看到每筆失敗後是否改過程式，以及程式算出的事實：此指令最近失敗幾次、最新錯誤連續出現幾次、最近一次失敗後是否改過程式。</li>
+        <li><strong>校準：</strong>沒有改檔資訊時，「改了兩三次同樣錯誤」只得 0.31 到 0.39。加上標記與事實後，循環最低 0.75，改檔後第一次重跑、錯誤改變、不同指令最高 0.14。門檻由 0.85 改為 0.6。</li>
+        <li><strong>同一段循環只擋一次：</strong>擋下時在最新一筆失敗標記 <code>warned</code>，下一次執行放行，讓 agent 能驗證新的修正；之後再失敗才可能再擋。避免 agent 修好了卻在 15 分鐘內無法跑測試驗證。</li>
+        <li><strong><code>.cto.json</code> 不再寫入所有門檻：</strong>新建時只有 <code>{"sprint_goal":"","thresholds":{}}</code>，門檻跟著套件預設值走，重新校準可隨更新生效；使用者只寫要覆寫的值。<code>setSprintGoal</code> 遇到無法解析的 <code>.cto.json</code> 會拒絕寫入，不覆蓋使用者的設定。</li>
+        <li><strong>setup 預設只新增：</strong><code>--yes</code>、<code>--agents</code> 與非互動模式只安裝，不移除其他 agent 已提交的 hook；只有互動式選單的「完整目標狀態」才會移除未勾選的 agent，且只讀取確實含 cto hook 的設定檔，無關 agent 的壞設定不會擋住安裝。</li>
+        <li><strong>其他：</strong>provider 清單選空代表全部不用（不再退回「全部都用」）；對話紀錄中 <code>isMeta</code>、<code>isCompactSummary</code> 項目不視為新的一輪；完成前檢查的事實以整輪計算，只有顯示給 Jev 的紀錄截取最後 40 筆。</li>
       </ul>
     </div>
 

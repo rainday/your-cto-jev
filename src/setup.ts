@@ -3,7 +3,6 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync,
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative } from 'node:path';
 import { agentNames, agents, hookCommand, type AgentName } from './agents.js';
-import { DEFAULT_CONFIG } from './brain.js';
 import { t, type Lang } from './i18n.js';
 
 const START = '# >>> YOUR CTO JEV START >>>';
@@ -102,7 +101,12 @@ function uninstallHooks(settings: any): boolean {
   return touched;
 }
 
-export interface SetupOptions { uninstall?: boolean; agents?: AgentName[] }
+export interface SetupOptions {
+  uninstall?: boolean;
+  agents?: AgentName[];
+  /** The agent list is the full desired set (interactive setup): unpicked agents lose their cto hooks. Default: add only. */
+  exact?: boolean;
+}
 
 export function setup(cwd: string, lang: Lang, opts: SetupOptions = {}): { code: number; lines: string[] } {
   const lines: string[] = [];
@@ -110,10 +114,12 @@ export function setup(cwd: string, lang: Lang, opts: SetupOptions = {}): { code:
   try { root = git(cwd, 'rev-parse', '--show-toplevel'); } catch { return { code: 1, lines: [t(lang, 'setup_not_git')] }; }
   const rel = (p: string) => relative(root, p) || p;
 
-  // Validate every config file we may touch before writing anything.
-  // Install touches every agent: chosen ones get hooks, the rest lose any cto hooks (the agent list is the full desired set).
-  const targets = opts.uninstall || opts.agents ? agentNames : [];
+  // Files we will touch: chosen agents get hooks; in exact mode (and on uninstall) agents that currently have cto hooks
+  // lose them. Any other agent's config is never read, so a broken unrelated file cannot block the install.
   const chosen = new Set(opts.uninstall ? [] : (opts.agents ?? []));
+  const removing = opts.uninstall || opts.exact ? wiredAgents(root).filter((n) => !chosen.has(n)) : [];
+  const targets = [...chosen, ...removing];
+  // Validate every config file we may touch before writing anything.
   const settings = new Map<AgentName, { path: string; json: any }>();
   for (const name of targets) {
     const path = join(root, agents[name].settings);
@@ -190,7 +196,8 @@ export function setup(cwd: string, lang: Lang, opts: SetupOptions = {}): { code:
   const cfgPath = join(root, '.cto.json');
   let goal = '';
   if (!existsSync(cfgPath)) {
-    writeFileSync(cfgPath, JSON.stringify(DEFAULT_CONFIG, null, 2) + '\n');
+    // Thresholds are left out on purpose: the package defaults apply and improve with each release. Add only overrides.
+    writeFileSync(cfgPath, JSON.stringify({ sprint_goal: '', thresholds: {} }, null, 2) + '\n');
     lines.push(t(lang, 'setup_config'));
   } else {
     try { goal = JSON.parse(readFileSync(cfgPath, 'utf8')).sprint_goal ?? ''; } catch { /* keep empty */ }
@@ -213,10 +220,17 @@ export function gitRoot(cwd: string): string | undefined {
   try { return git(cwd, 'rev-parse', '--show-toplevel'); } catch { return undefined; }
 }
 
-/** Set sprint_goal in .cto.json, keeping everything else in the file. */
-export function setSprintGoal(root: string, goal: string): void {
+/**
+ * Set sprint_goal in .cto.json, keeping everything else in the file.
+ * Refuses (returns false) when the file exists but is not a JSON object: never overwrite someone's thresholds.
+ */
+export function setSprintGoal(root: string, goal: string): boolean {
   const path = join(root, '.cto.json');
-  let cfg: any = DEFAULT_CONFIG;
-  try { cfg = JSON.parse(readFileSync(path, 'utf8')); } catch { /* create */ }
+  let cfg: any = { sprint_goal: '', thresholds: {} };
+  if (existsSync(path)) {
+    try { cfg = JSON.parse(readFileSync(path, 'utf8')); } catch { return false; }
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return false;
+  }
   writeFileSync(path, JSON.stringify({ ...cfg, sprint_goal: goal }, null, 2) + '\n');
+  return true;
 }

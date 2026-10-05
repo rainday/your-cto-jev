@@ -12,7 +12,8 @@ const NON_CODE = /(\.(md|mdx|txt|rst|adoc|ya?ml)$)|(^|[\\/])\.github[\\/]/i;
 export const isCodeFile = (f: string) => !NON_CODE.test(f);
 
 const isHumanTurn = (j: any) => {
-  if (j?.type !== 'user') return false;
+  // Claude Code writes meta entries (image notes, skill text, compact summaries) as type "user" mid-turn.
+  if (j?.type !== 'user' || j.isMeta || j.isCompactSummary) return false;
   const c = j.message?.content;
   if (typeof c === 'string') return true;
   return Array.isArray(c) && c.some((b) => b?.type === 'text') && !c.some((b) => b?.type === 'tool_result');
@@ -70,10 +71,11 @@ export function turnActions(transcriptPath: string, cwd?: string): Action[] {
 
 /** The text Jev sees: final message, the action log, and the one fact code can compute exactly. Masked. */
 export function turnState(lastMessage: string, actions: Action[]): string {
-  const recent = actions.slice(-40);
+  // The fact is computed over the whole turn; only the log shown to Jev is trimmed.
   let lastEdit = -1;
-  recent.forEach((a, i) => { if (a.kind === 'edit' && isCodeFile(a.file)) lastEdit = i; });
-  const after = lastEdit < 0 ? null : recent.slice(lastEdit + 1).flatMap((a) => (a.kind === 'run' ? [oneLine(a.command, 120)] : []));
+  actions.forEach((a, i) => { if (a.kind === 'edit' && isCodeFile(a.file)) lastEdit = i; });
+  const after = lastEdit < 0 ? null : actions.slice(lastEdit + 1).flatMap((a) => (a.kind === 'run' ? [oneLine(a.command, 120)] : []));
+  const recent = actions.slice(-40);
   const fact = after === null
     ? 'No code files were edited this turn.'
     : after.length ? `Commands that ran after the last code edit: ${after.join('; ')}` : 'No command ran after the last code edit.';

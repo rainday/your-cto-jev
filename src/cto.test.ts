@@ -16,7 +16,7 @@ const claudePre = (i: any, e: any) => agentPre(agents.claude, agents.claude.pars
 const claudePost = (i: any, e: any) => agentPost(agents.claude.parsePost(i), e);
 import { detectLang } from './i18n.js';
 import { maskDiff, maskSensitiveState } from './masker.js';
-import { setup } from './setup.js';
+import { setSprintGoal, setup } from './setup.js';
 
 const loadBrainCd = (b: any) => b.provider_cooldown.cloudflare;
 process.env.CTO_NO_UPDATE_CHECK = '1'; // tests never hit the registry or write the user's cache
@@ -679,38 +679,105 @@ test('done check: parses the current turn from the transcript, gates on code edi
   assert.ok(!existsSync(settingsPath));
 });
 
-test('after an edit, earlier failures no longer count: re-running the same command after a fix is not a loop', async () => {
-  const { agentEdit } = await import('./hooks.js');
+test('edits mark failures instead of erasing them; the loop fact counts repeats and edits', async () => {
+  const { agentEdit, loopFact } = await import('./hooks.js');
   setKeys();
   process.env.CTO_PROVIDER = 'openrouter';
   let sent: any;
-  globalThis.fetch = (async (_u: string, init: any) => { sent = JSON.parse(init.body); return new Response(JSON.stringify(answers({ destructive_command: noul(0.01), infinite_loop: noul(0.95) }))); }) as any;
+  globalThis.fetch = (async (_u: string, init: any) => { sent = JSON.parse(init.body); return new Response(JSON.stringify(answers({ destructive_command: noul(0.01), infinite_loop: noul(0.1) }))); }) as any;
   const root = tmp();
   const env = { root, lang: 'en' as const };
-  for (let i = 0; i < 2; i++) claudePost({ tool_input: { command: 'npm test' }, error: 'Exit code 1\nexpected 180, got 18000' }, env);
+  const fail = () => claudePost({ tool_input: { command: 'npm test' }, error: 'Exit code 1\nexpected 180, got 18000' }, env);
 
-  // without an edit in between, the retry is checked as a possible loop (and blocked here)
-  let out = await claudePre({ session_id: 'L', tool_input: { command: 'npm test' } }, env);
-  assert.ok(sent.questions.infinite_loop);
-  assert.equal(out.code, 2);
+  fail();
+  await claudePre({ session_id: 'L', tool_input: { command: 'npm test' } }, env);
+  assert.match(sent.state, /failed 1 time\(s\) recently; its latest error has now appeared 1 time\(s\) in a row; the agent has not edited/);
 
-  // the agent fixes the code, then re-runs the same command
-  agentEdit(env);
-  assert.equal(loadBrain(root).recent_errors.length, 0);
-  out = await claudePre({ session_id: 'L', tool_input: { command: 'npm test' } }, env);
-  assert.equal(sent.questions.infinite_loop, undefined, 'no loop question after a fix');
-  assert.equal(out.code, 0);
+  agentEdit('README.md', env);
+  assert.ok(!loadBrain(root).recent_errors[0].edited_after, 'docs edits do not count as a fix attempt');
+  agentEdit(join('src', 'cart.ts'), env);
+  assert.equal(loadBrain(root).recent_errors.length, 1, 'failures are kept');
+  await claudePre({ session_id: 'L', tool_input: { command: 'npm test' } }, env);
+  assert.match(sent.state, /\(the agent edited code after this failure\)/);
+  assert.match(sent.state, /the agent has edited code since the most recent failure/);
+
+  // same error again after the edit, edit again: the streak shows it is a repeated failed fix
+  fail();
+  agentEdit(join('src', 'cart.ts'), env);
+  await claudePre({ session_id: 'L', tool_input: { command: 'npm test' } }, env);
+  assert.match(sent.state, /failed 2 time\(s\) recently; its latest error has now appeared 2 time\(s\) in a row; the agent has edited code/);
+  assert.match(loopFact('npm run build', loadBrain(root).recent_errors), /none of the recent failures were this exact command/);
+  setKeys(false);
+});
+
+test('review fixes 2: empty provider pick means none; setup is additive unless exact; safe .cto.json handling', async () => {
+  // empty pick = use no provider (not "all")
+  setKeys();
+  savePrefs({ provider_order: [] });
+  assert.deepEqual(providerOrder(), []);
+  savePrefs({});
   setKeys(false);
 
-  // setup wires the edit hook next to the user's own PostToolUse hooks, and removes only ours
+  // --yes / flags only add: committed hooks of agents this machine lacks stay put
   const repo = tmp();
   execFileSync('git', ['init', '-q'], { cwd: repo });
-  mkdirSync(join(repo, '.claude'));
-  const mine = { hooks: { PostToolUse: [{ matcher: 'Write', hooks: [{ type: 'command', command: 'prettier --write' }] }] } };
-  writeFileSync(join(repo, '.claude', 'settings.local.json'), JSON.stringify(mine));
+  setup(repo, 'en', { agents: ['claude', 'cursor'] });
   setup(repo, 'en', { agents: ['claude'] });
-  const s = JSON.parse(readFileSync(join(repo, '.claude', 'settings.local.json'), 'utf8'));
-  assert.deepEqual(s.hooks.PostToolUse[1], { matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: 'cto --hook claude-edit' }] });
-  setup(repo, 'en', { uninstall: true });
-  assert.deepEqual(JSON.parse(readFileSync(join(repo, '.claude', 'settings.local.json'), 'utf8')), mine);
+  assert.match(readFileSync(join(repo, '.cursor', 'hooks.json'), 'utf8'), /cto --hook cursor-pre/, 'additive by default');
+  setup(repo, 'en', { agents: ['claude'], exact: true });
+  assert.ok(!existsSync(join(repo, '.cursor', 'hooks.json')), 'exact mode removes unpicked agents');
+
+  // a broken config of an agent nobody asked about cannot block the install
+  mkdirSync(join(repo, '.gemini'));
+  writeFileSync(join(repo, '.gemini', 'settings.json'), '{ broken');
+  assert.equal(setup(repo, 'en', { agents: ['claude'] }).code, 0);
+  assert.equal(setup(repo, 'en', { agents: ['claude'], exact: true }).code, 0, 'gemini has no cto hooks, so it is not read');
+
+  // new .cto.json leaves thresholds to the package defaults; a broken one is never overwritten
+  const fresh = tmp();
+  execFileSync('git', ['init', '-q'], { cwd: fresh });
+  setup(fresh, 'en', { agents: [] });
+  assert.deepEqual(JSON.parse(readFileSync(join(fresh, '.cto.json'), 'utf8')), { sprint_goal: '', thresholds: {} });
+  assert.ok(setSprintGoal(fresh, 'ship billing'));
+  assert.equal(JSON.parse(readFileSync(join(fresh, '.cto.json'), 'utf8')).sprint_goal, 'ship billing');
+  writeFileSync(join(fresh, '.cto.json'), '{ "thresholds": { "credential_leak": 0.3 }, }');
+  assert.equal(setSprintGoal(fresh, 'x'), false);
+  assert.equal(readFileSync(join(fresh, '.cto.json'), 'utf8'), '{ "thresholds": { "credential_leak": 0.3 }, }', 'left untouched');
+});
+
+test('review fixes 3: meta transcript entries do not start a new turn; the fact sees edits beyond the shown log', async () => {
+  const { turnActions, turnState } = await import('./turn.js');
+  const dir = tmp();
+  const L = (o: unknown) => JSON.stringify(o);
+  const p = join(dir, 't.jsonl');
+  writeFileSync(p, [
+    L({ type: 'user', message: { role: 'user', content: 'fix it' } }),
+    L({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'e1', name: 'Edit', input: { file_path: join(dir, 'src', 'a.ts') } }] } }),
+    L({ type: 'user', isMeta: true, message: { role: 'user', content: '[Image: original 800x600]' } }),
+  ].join('\n'));
+  assert.equal(turnActions(p, dir).length, 1, 'the edit before the meta entry still belongs to this turn');
+
+  const many = [{ kind: 'edit' as const, file: 'src/a.ts' }, ...Array.from({ length: 45 }, (_, i) => ({ kind: 'edit' as const, file: `docs/n${i}.md` }))];
+  assert.match(turnState('Done', many), /Fact: No command ran after the last code edit/, 'code edit 46 actions back still counts');
+});
+
+test('a loop is blocked once per episode, so the agent can still verify its next fix', async () => {
+  setKeys();
+  process.env.CTO_PROVIDER = 'openrouter';
+  let asked = 0;
+  globalThis.fetch = (async (_u: string, init: any) => {
+    if (JSON.parse(init.body).questions.infinite_loop) asked++;
+    return new Response(JSON.stringify(answers({ destructive_command: noul(0.01), infinite_loop: noul(0.95) })));
+  }) as any;
+  const root = tmp();
+  const env = { root, lang: 'en' as const };
+  const fail = () => claudePost({ tool_input: { command: 'npm test' }, error: 'Exit code 1\nsame' }, env);
+  const pre = () => claudePre({ session_id: 'E', tool_input: { command: 'npm test' } }, env);
+  fail(); fail();
+  assert.equal((await pre()).code, 2, 'loop blocked');
+  assert.equal((await pre()).code, 0, 'next attempt after the warning may run');
+  assert.equal(asked, 1, 'no loop question while the latest failure is already warned');
+  fail();
+  assert.equal((await pre()).code, 2, 'a new failure can be blocked again');
+  setKeys(false);
 });

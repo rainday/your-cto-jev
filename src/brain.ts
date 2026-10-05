@@ -8,7 +8,7 @@ export interface CtoConfig {
   thresholds: Record<Signal, number>;
 }
 
-export interface RecentError { command: string; error: string; at: string }
+export interface RecentError { command: string; error: string; at: string; edited_after?: boolean; warned?: boolean }
 export interface Cooldown { until: number; status: string }
 
 export interface Brain {
@@ -25,7 +25,7 @@ export const DEFAULT_CONFIG: CtoConfig = {
   thresholds: {
     credential_leak: 0.5,
     destructive_command: 0.7,
-    infinite_loop: 0.85,
+    infinite_loop: 0.6,
     architecture_violation: 0.85,
     test_tampering: 0.8,
     done_unverified: 0.6,

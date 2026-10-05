@@ -105,7 +105,7 @@ cto doctor
 Other forms:
 
 ```sh
-cto setup --agents claude,cursor --yes   # non-interactive (scripts, CI)
+cto setup --agents claude,cursor --yes   # non-interactive (scripts, CI); only adds, never removes
 cto setup --uninstall                    # remove every cto hook again
 cto doctor                               # is it actually working?
 ```
@@ -160,22 +160,18 @@ Nothing else is uploaded, and nothing is logged unless you set `CTO_DEBUG=1`. Th
 
 ## Configuration
 
-`.cto.json` is shared with the team, so commit it:
+`.cto.json` is shared with the team, so commit it. `cto setup` creates it with no thresholds, so the package defaults apply and improve with each release; add only the ones you want to override:
 
 ```json
 {
   "sprint_goal": "",
   "thresholds": {
-    "credential_leak": 0.5,
-    "test_tampering": 0.8,
-    "done_unverified": 0.6,
-    "destructive_command": 0.7,
-    "infinite_loop": 0.85,
-    "architecture_violation": 0.85,
-    "code_complexity": 2
+    "destructive_command": 0.45
   }
 }
 ```
+
+Defaults: `credential_leak` 0.5, `destructive_command` 0.7, `infinite_loop` 0.6, `test_tampering` 0.8, `done_unverified` 0.6, `architecture_violation` 0.85, `code_complexity` 2.
 
 - **`sprint_goal`**: fill it in to enable the architecture check, for example `"Ship Stripe billing, no new services"`.
 - **Thresholds**: Jev returns a probability from 0 to 1. `code_complexity` is the exception: it is a score from 0 (clean) to 4 (unmaintainable).
@@ -196,7 +192,7 @@ Nothing else is uploaded, and nothing is logged unless you set `CTO_DEBUG=1`. Th
 
 - **Git GUIs hide warnings.** VS Code, SourceTree and GitKraken usually hide hook output when the commit succeeds, so the architecture and complexity warnings are invisible there. Blocks still show.
 - **The done check only sees edits made with the agent's edit tools.** A file changed through a shell command (for example `sed`) does not count as an edit, so that turn is not checked. It also misses a test run that targets the wrong package. It runs in Claude Code only for now.
-- **Loop detection forgets failures once the agent edits a file**, so re-running a command after a fix is not treated as a loop. In Claude Code this uses the agent's edit tools; a file changed only through a shell command does not reset it, and failures also expire after 15 minutes.
+- **Loop detection knows about edits, but only through the agent's edit tools.** A first re-run after a code edit is a new attempt, while the same error coming back across repeated fixes still counts as a loop; each loop is blocked once, so the agent can still verify its next fix. A file changed only through a shell command is not seen as an edit, and failures expire after 15 minutes.
 - **Each agent shell command waits for one Jev request.** OpenRouter answered in about 0.3 s in our tests, Cloudflare in about 0.9 s with occasional spikes past 3 s. Agent checks wait up to 5 s before failing open.
 
 ## Development

@@ -62,12 +62,13 @@ export interface EvalCtx {
 }
 
 /**
- * Providers to try, in order: CTO_PROVIDER > the order picked in setup (only those) > every provider with a key.
+ * Providers to try, in order: CTO_PROVIDER > the order picked in setup (only those; an empty pick means none) > every
+ * provider with a key when nothing was ever picked.
  * Keys of providers left out of the picked order stay stored, so re-enabling one later needs no re-entry.
  */
 export function providerOrder(): string[] {
   const picked = loadPrefs().provider_order;
-  const order = env.CTO_PROVIDER ? [env.CTO_PROVIDER] : picked?.length ? picked : Object.keys(providers);
+  const order = env.CTO_PROVIDER ? [env.CTO_PROVIDER] : picked !== undefined ? picked : Object.keys(providers);
   return order.filter((n) => providers[n]?.enabled());
 }
 

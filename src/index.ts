@@ -46,7 +46,10 @@ async function runHook(name: string): Promise<HookOutput> {
   const agent = agents[m[1] as AgentName];
   let input: any = {};
   try { input = JSON.parse(raw); } catch { /* fail-open below */ }
-  if (m[2] === 'edit') return agentEdit({ root: findRoot(typeof input?.cwd === 'string' ? input.cwd : process.cwd()), lang });
+  if (m[2] === 'edit') {
+    const file = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path;
+    return agentEdit(typeof file === 'string' ? file : undefined, { root: findRoot(typeof input?.cwd === 'string' ? input.cwd : process.cwd()), lang });
+  }
   if (m[2] === 'stop') {
     if (!agent.parseStop) return { code: 0, stderr: [] };
     const stop = agent.parseStop(input);
@@ -112,8 +115,10 @@ if (args[0] === '--hook' && args[1]) {
   } else if (!uninstall) {
     chosen = detectAgents();
   }
-  const r = setup(process.cwd(), lang, { uninstall, agents: chosen });
-  if (!r.code && root && goal !== undefined) setSprintGoal(root, goal);
+  const r = setup(process.cwd(), lang, { uninstall, agents: chosen, exact: goal !== undefined });
+  if (!r.code && root && goal !== undefined && goal !== loadConfig(root).sprint_goal && !setSprintGoal(root, goal)) {
+    r.lines.push(t(lang, 'setup_goal_bad_json'));
+  }
   const latest = r.code ? undefined : await checkUpdate();
   if (latest) r.lines.push(t(lang, 'update_available', { latest, current: currentVersion() }));
   (r.code ? process.stderr : process.stdout).write(r.lines.join('\n') + '\n');
