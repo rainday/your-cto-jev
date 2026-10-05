@@ -651,7 +651,7 @@ test('done check: parses the current turn from the transcript, gates on code edi
   globalThis.fetch = (async () => { calls++; return new Response(JSON.stringify(reply)); }) as any;
   const root = tmp();
   const stop = (transcriptPath: string, stopHookActive = false) =>
-    agentStop({ transcriptPath, cwd: dir, lastMessage: 'Done!', stopHookActive, sessionId: 's' }, { root, lang: 'en' });
+    agentStop(agents.claude, { transcriptPath, cwd: dir, lastMessage: 'Done!', stopHookActive, sessionId: 's' }, { root, lang: 'en' });
 
   let out = await stop(p1);
   assert.equal(out.code, 2);
@@ -996,4 +996,78 @@ test('shell edits count as edits: sed -i, redirects, tee, cp/mv/rm, formatters; 
   const acts = turnActions(p, dir);
   assert.deepEqual(acts.map((a) => a.kind), ['edit', 'run'], 'the write is listed before the run that contains it');
   assert.match(turnState('Done', acts), /Commands that ran after the last code edit: sed -i/);
+});
+
+test('done check for Cursor, Gemini and Codex runs on cto\'s own turn log, with each agent\'s way to keep working', async () => {
+  const { agentPre, agentPost, agentEdit, agentStop, agentReply } = await import('./hooks.js');
+  setKeys();
+  process.env.CTO_PROVIDER = 'openrouter';
+  let sent: any;
+  let doneScore = 0.9;
+  globalThis.fetch = (async (_u: string, init: any) => {
+    sent = JSON.parse(init.body);
+    return new Response(JSON.stringify(answers({ destructive_command: noul(0.01), done_unverified: noul(doneScore) })));
+  }) as any;
+  const root = tmp();
+  const env = { root, lang: 'en' as const };
+  const cx = agents.codex;
+
+  // Codex: patch, then stop claiming success with nothing run -> sent back to work (exit 2)
+  const patch = { session_id: 'C1', cwd: root, tool_name: 'apply_patch', tool_input: { command: '*** Begin Patch\n*** Update File: src/a.ts\n*** End Patch' } };
+  agentEdit(cx.parseEdit!(patch), env, cx.session(patch));
+  let out = await agentStop(cx, cx.parseStop!({ session_id: 'C1', cwd: root, last_assistant_message: 'Done, all tests pass.', stop_hook_active: false }), env);
+  assert.equal(out.code, 2);
+  assert.match(out.stderr.join('\n'), /Done, you say\? Show me/);
+  assert.match(sent.state, /edited src\/a\.ts/);
+  assert.match(sent.state, /No command ran after the last code edit/);
+  assert.equal(loadBrain(root).turns?.C1, undefined, 'the turn log ends with the stop');
+
+  // Codex: patch, test fails, the failure is in the log
+  agentEdit(cx.parseEdit!(patch), env, 'C2');
+  await agentPre(cx, cx.parsePre({ session_id: 'C2', cwd: root, tool_input: { command: 'npm test' } }), env);
+  agentPost(cx.parsePost({ session_id: 'C2', cwd: root, tool_input: { command: 'npm test' }, tool_response: { exit_code: 1, output: '2 failed' } }), env);
+  doneScore = 0.95;
+  await agentStop(cx, cx.parseStop!({ session_id: 'C2', cwd: root, last_assistant_message: 'Fixed.', stop_hook_active: false }), env);
+  assert.match(sent.state, /ran: npm test -> FAILED/);
+
+  // Codex: patch, test passes -> allowed
+  agentEdit(cx.parseEdit!(patch), env, 'C3');
+  await agentPre(cx, cx.parsePre({ session_id: 'C3', cwd: root, tool_input: { command: 'npm test' } }), env);
+  doneScore = 0.1;
+  out = await agentStop(cx, cx.parseStop!({ session_id: 'C3', cwd: root, last_assistant_message: 'Fixed; tests pass.', stop_hook_active: false }), env);
+  assert.equal(out.code, 0);
+  assert.match(sent.state, /Commands that ran after the last code edit: npm test/);
+
+  // Cursor: final text comes from afterAgentResponse; a block is a followup_message; our own follow-up is not re-checked
+  const cu = agents.cursor;
+  agentEdit(cu.parseEdit!({ conversation_id: 'K1', workspace_roots: [root], file_path: join(root, 'src', 'b.ts') }), env, 'K1');
+  agentReply(cu.parseReply!({ conversation_id: 'K1', workspace_roots: [root], text: 'All done, it works.' }), env);
+  doneScore = 0.9;
+  out = await agentStop(cu, cu.parseStop!({ conversation_id: 'K1', workspace_roots: [root], status: 'completed', loop_count: 0 }), env);
+  assert.equal(out.code, 0);
+  assert.match(JSON.parse(out.stdout!).followup_message, /Done, you say\?/);
+  assert.match(sent.state, /All done, it works\./);
+  agentEdit(['src/b.ts'], env, 'K1');
+  const calls = sent;
+  out = await agentStop(cu, cu.parseStop!({ conversation_id: 'K1', workspace_roots: [root], status: 'completed', loop_count: 1 }), env);
+  assert.deepEqual(out, { code: 0, stderr: [] }, 'loop_count > 0: never re-check our own follow-up');
+  assert.equal(sent, calls, 'no Jev call');
+
+  // Gemini: AfterAgent with prompt_response; exit 2 retries
+  const ge = agents.gemini;
+  agentEdit(ge.parseEdit!({ session_id: 'G1', tool_name: 'replace', tool_input: { file_path: 'src/c.ts' } }), env, 'G1');
+  out = await agentStop(ge, ge.parseStop!({ session_id: 'G1', cwd: root, prompt_response: 'Implemented and verified.', stop_hook_active: false }), env);
+  assert.equal(out.code, 2);
+  assert.match(sent.state, /Implemented and verified\./);
+  setKeys(false);
+
+  // setup wires every agent's stop event (and Cursor's reply event)
+  const repo = tmp();
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  setup(repo, 'en', { agents: ['cursor', 'gemini', 'codex'] });
+  const read = (p: string) => JSON.parse(readFileSync(join(repo, p), 'utf8'));
+  assert.deepEqual(read('.cursor/hooks.json').hooks.stop, [{ command: 'cto --hook cursor-stop' }]);
+  assert.deepEqual(read('.cursor/hooks.json').hooks.afterAgentResponse, [{ command: 'cto --hook cursor-reply' }]);
+  assert.equal(read('.gemini/settings.json').hooks.AfterAgent[0].hooks[0].command, 'cto --hook gemini-stop');
+  assert.equal(read('.codex/hooks.json').hooks.Stop[0].hooks[0].command, 'cto --hook codex-stop');
 });

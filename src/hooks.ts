@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { styleText } from 'node:util';
 import { checkUpdate, currentVersion } from './update.js';
-import type { Agent, HookOutput, PostInput, PreInput, StopInput } from './agents.js';
+import type { Agent, HookOutput, PostInput, PreInput, ReplyInput, StopInput } from './agents.js';
 import { isCodeFile, turnActions, turnState } from './turn.js';
 import { shellWrites } from './shellwrites.js';
 import { evaluate, providerOrder, providers, type EvalResult } from './api.js';
@@ -9,7 +9,7 @@ import { freshErrors, loadBrain, loadConfig, saveBrain, type Brain, type CtoConf
 import { chunkDiff, filterDiff, pool } from './diff.js';
 import { personaDict, t, type Lang } from './i18n.js';
 import { maskDiff, maskSensitiveState } from './masker.js';
-import type { JevAnswer, JevQuestion, Signal } from './types.js';
+import type { JevAnswer, JevQuestion, Signal, TurnAction } from './types.js';
 
 
 // Exported so the calibration script (scripts/calibrate.mjs) measures exactly the questions that ship.
@@ -233,6 +233,10 @@ export async function agentPre(agent: Agent, input: PreInput, { root, lang, now 
   // A command that writes code files (sed -i, redirects, formatters) is a fix attempt, same as an edit tool. Marked
   // before it runs: pre hooks exist for every agent, so this also covers agents without a usable edit event.
   const written = shellWrites(command);
+  if (input.sessionId && !agent.transcriptTurns && agent.stop) {
+    for (const f of written) logAction(brain, input.sessionId, { kind: 'edit', file: f === '?' ? `(files written by: ${command.slice(0, 60)})` : f });
+    logAction(brain, input.sessionId, { kind: 'run', command: maskSensitiveState(command), ok: true, tail: '' });
+  }
   if (written.length && (written.includes('?') || written.some(isCodeFile)) && brain.recent_errors.some((e) => !e.edited_after)) {
     brain.recent_errors = brain.recent_errors.map((e) => ({ ...e, edited_after: true }));
   }
@@ -277,16 +281,23 @@ export async function agentPre(agent: Agent, input: PreInput, { root, lang, now 
  * Blocks once (exit 2 makes the agent keep working); never blocks again while a stop hook is already active,
  * so it cannot loop. Turns without code edits never reach Jev.
  */
-export async function agentStop(input: StopInput, { root, lang, now }: Env): Promise<HookOutput> {
-  const out: HookOutput = { code: 0, stderr: [] };
-  if (input.stopHookActive || !input.transcriptPath) return out;
-  const actions = turnActions(input.transcriptPath, input.cwd);
+export async function agentStop(agent: Agent, input: StopInput, { root, lang, now }: Env): Promise<HookOutput> {
+  let out: HookOutput = { code: 0, stderr: [] };
+  const brain = loadBrain(root);
+  // Claude Code: read the turn from its transcript. Others: cto's own turn log, which ends with this stop either way.
+  const logged = input.sessionId ? brain.turns?.[input.sessionId] : undefined;
+  if (!input.transcriptPath && input.sessionId && brain.turns?.[input.sessionId]) {
+    delete brain.turns[input.sessionId];
+    saveBrain(root, brain);
+  }
+  if (input.stopHookActive) return out;
+  const actions = input.transcriptPath ? turnActions(input.transcriptPath, input.cwd) : logged?.actions ?? [];
+  const lastMessage = input.lastMessage || logged?.reply || '';
   if (!actions.some((a) => a.kind === 'edit' && isCodeFile(a.file))) return out;
 
   const cfg = loadConfig(root);
-  const brain = loadBrain(root);
   const r = await evaluate(
-    { state: turnState(input.lastMessage, actions), questions: { done_unverified: Q.done_unverified }, ...(input.sessionId && { session_id: input.sessionId }) },
+    { state: turnState(lastMessage, actions), questions: { done_unverified: Q.done_unverified }, ...(input.sessionId && { session_id: input.sessionId }) },
     { brain, lang, timeoutMs: AGENT_TIMEOUT_MS, notices: new Set(), now },
   );
   if (!r.ok) brain.skipped_attempts++;
@@ -294,11 +305,36 @@ export async function agentStop(input: StopInput, { root, lang, now }: Env): Pro
   const v = r.ok ? exceeded(r.answers, 'done_unverified', cfg) : undefined;
   if (v !== undefined) {
     brain.blocked_attempts++;
-    out.code = 2;
-    out.stderr = verdict(lang, 'done_unverified', v, cfg, null);
+    out = agent.stopBlock(verdict(lang, 'done_unverified', v, cfg, null));
   }
   saveBrain(root, brain);
   return out;
+}
+
+// ---------- turn log (agents without a readable transcript) ----------
+
+const TURN_MAX_ACTIONS = 80;
+const TURN_MAX_SESSIONS = 5;
+
+/** Append one action to a session's turn log; keeps the log and the number of sessions bounded. */
+export function logAction(brain: Brain, sessionId: string, action: TurnAction) {
+  brain.turns ??= {};
+  const t = (brain.turns[sessionId] ??= { at: '', actions: [] });
+  t.actions = [...t.actions, action].slice(-TURN_MAX_ACTIONS);
+  t.at = new Date().toISOString();
+  const ids = Object.keys(brain.turns).sort((a, b) => brain.turns![b].at.localeCompare(brain.turns![a].at));
+  for (const id of ids.slice(TURN_MAX_SESSIONS)) delete brain.turns[id];
+}
+
+/** Cursor's final reply arrives in its own event, before stop. */
+export function agentReply(input: ReplyInput, { root }: Env): HookOutput {
+  if (!input.sessionId || !input.text.trim()) return { code: 0, stderr: [] };
+  const brain = loadBrain(root);
+  brain.turns ??= {};
+  const t = (brain.turns[input.sessionId] ??= { at: new Date().toISOString(), actions: [] });
+  t.reply = input.text;
+  saveBrain(root, brain);
+  return { code: 0, stderr: [] };
 }
 
 // ---------- post (failure recording) ----------
@@ -309,9 +345,13 @@ export async function agentStop(input: StopInput, { root, lang, now }: Env): Pro
  * re-run after a fix is a new attempt, but the same error coming back across repeated fixes is still a loop, and only
  * the history shows that. Local only: no Jev call, no network. Docs/YAML edits do not count.
  */
-export function agentEdit(files: string[] | undefined, { root }: Env): HookOutput {
-  if (files && !files.some(isCodeFile)) return { code: 0, stderr: [] };
+export function agentEdit(files: string[] | undefined, { root }: Env, logSession?: string): HookOutput {
   const brain = loadBrain(root);
+  if (logSession) {
+    for (const f of files ?? ['(unknown file)']) logAction(brain, logSession, { kind: 'edit', file: f });
+    saveBrain(root, brain);
+  }
+  if (files && !files.some(isCodeFile)) return { code: 0, stderr: [] };
   if (brain.recent_errors.some((e) => !e.edited_after)) {
     brain.recent_errors = brain.recent_errors.map((e) => ({ ...e, edited_after: true }));
     saveBrain(root, brain);
@@ -341,6 +381,9 @@ export function loopFact(command: string, recent: RecentError[]): string {
 export function agentPost(input: PostInput | null, { root }: Env): HookOutput {
   if (!input) return { code: 0, stderr: [] };
   const brain = loadBrain(root);
+  const turn = input.sessionId ? brain.turns?.[input.sessionId] : undefined;
+  const run = turn?.actions.findLast((a) => a.kind === 'run' && a.command === maskSensitiveState(input.command));
+  if (run && run.kind === 'run') { run.ok = false; run.tail = maskSensitiveState(input.error).slice(-300); }
   brain.recent_errors = [
     ...freshErrors(brain),
     {

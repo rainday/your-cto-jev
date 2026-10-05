@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { Signal } from './types.js';
+import type { Signal, TurnAction } from './types.js';
 
 export interface CtoConfig {
   sprint_goal: string;
@@ -19,6 +19,8 @@ export interface Brain {
   provider_cooldown: Record<string, Cooldown>;
   notified_sessions: string[];
   checks?: number; // checks Jev answered (any hook)
+  /** cto's own per-session turn log, for agents whose transcript format is not public (Cursor, Gemini CLI, Codex). */
+  turns?: Record<string, { at: string; actions: TurnAction[]; reply?: string }>;
   last_check_at?: string;
 }
 

@@ -20,6 +20,9 @@ export interface JevResponse {
   usage: { input_tokens: number; output_tokens: number; cost?: number };
 }
 
+/** One step of an agent's turn, as seen by the done check. */
+export type TurnAction = { kind: 'edit'; file: string } | { kind: 'run'; command: string; ok: boolean; tail: string };
+
 export type Signal =
   | 'credential_leak'
   | 'destructive_command'

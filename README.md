@@ -2,7 +2,7 @@
 
 **A sharp-tongued CTO that reviews what your AI coding agent is about to do, and says no.**
 
-`cto` hooks into `git commit` and into Claude Code, Cursor, Gemini CLI and Codex. Before a commit lands, before an agent runs a shell command, and when Claude Code says it is done, it asks [TypeSafe Jev](https://developers.cloudflare.com/ai/models/typesafe/jev/), a typed decision model, a few yes/no questions. Then it blocks, warns, or stays completely silent.
+`cto` hooks into `git commit` and into Claude Code, Cursor, Gemini CLI and Codex. Before a commit lands, before an agent runs a shell command, and when an agent says it is done, it asks [TypeSafe Jev](https://developers.cloudflare.com/ai/models/typesafe/jev/), a typed decision model, a few yes/no questions. Then it blocks, warns, or stays completely silent.
 
 ```text
 $ git commit -m "add payments"
@@ -34,7 +34,7 @@ Jev judges meaning and answers with probabilities, not prose. It costs about $0.
 | `test_tampering` | `git commit`s that touch tests or test config | **Blocks** the commit |
 | `destructive_command` | every agent shell command | **Blocks** the command |
 | `infinite_loop` | agent shell commands, after a recent failure | **Blocks** the command |
-| `done_unverified` | Claude Code ending a turn that edited code | **Sends it back to work** until the change is verified or the gap is disclosed |
+| `done_unverified` | an agent ending a turn that edited code | **Sends it back to work** until the change is verified or the gap is disclosed |
 | `architecture_violation` | `git commit`, once you set a sprint goal | Warns only |
 | `code_complexity` | every `git commit` | Warns only |
 
@@ -151,10 +151,10 @@ The git pre-commit check is always installed. It protects every agent and every 
 
 | Agent | Config written | Command gate | Loop detection | Knows about edits | Done check |
 |---|---|---|---|---|---|
-| Claude Code | `.claude/settings.local.json` | yes | yes | yes | yes |
-| Cursor | `.cursor/hooks.json` | yes | yes | yes (`afterFileEdit`) | not yet |
-| Gemini CLI | `.gemini/settings.json` | yes | yes | yes (`write_file`, `replace`) | not yet |
-| Codex CLI | `.codex/hooks.json` | yes | limited: Codex has no failure event | yes (`apply_patch`) | not yet |
+| Claude Code | `.claude/settings.local.json` | yes | yes | yes | yes, from its transcript |
+| Cursor | `.cursor/hooks.json` | yes | yes | yes (`afterFileEdit`) | yes (`stop`, follow-up message) |
+| Gemini CLI | `.gemini/settings.json` | yes | yes | yes (`write_file`, `replace`) | yes (`AfterAgent`, retry) |
+| Codex CLI | `.codex/hooks.json` | yes | limited: Codex has no failure event | yes (`apply_patch`) | yes (`Stop`) |
 
 Claude Code is tested end to end inside the agent. The Cursor, Gemini CLI and Codex adapters follow each agent's official hook docs and are tested with their documented payloads, but have not been run inside those agents yet. Reports welcome.
 
@@ -185,7 +185,7 @@ Every check sends text to your chosen provider. `cto` masks it first:
 
 - **For commits:** the staged diff, with lock files, minified files, source maps and binaries removed.
 - **For agent commands:** the command, plus up to five failures from the last 15 minutes when checking for loops.
-- **When Claude Code ends a turn that edited code:** the agent's final message and a log of that turn: names of edited files, the shell commands it ran, whether each succeeded, and the last 200 characters of each output.
+- **When an agent ends a turn that edited code:** the agent's final message and a log of that turn: names of edited files, the shell commands it ran, whether each succeeded, and the end of each output (Claude Code) or of each failure (other agents).
 - **For `cto check`:** the same as a commit; when nothing is staged, all working-tree changes, including the full content of new files git does not track yet.
 - **Always masked:** private key blocks, Stripe, OpenAI, AWS, GitHub and npm tokens, and any `NAME=value` whose name ends in `PASSWORD`, `SECRET`, `TOKEN` or `KEY`. Every value in a `.env` file is masked as well.
 
@@ -227,7 +227,7 @@ Defaults: `credential_leak` 0.5, `destructive_command` 0.7, `infinite_loop` 0.6,
 ## Known limitations
 
 - **Git GUIs hide warnings.** VS Code, SourceTree and GitKraken usually hide hook output when the commit succeeds, so the architecture and complexity warnings are invisible there. Blocks still show.
-- **The done check only sees edits made with the agent's edit tools.** A file changed through a shell command (for example `sed`) does not count as an edit, so that turn is not checked. It also misses a test run that targets the wrong package. It runs in Claude Code only for now.
+- **The done check sees edits from edit tools and from common shell commands** (`sed -i`, redirects, `tee`, formatters), but not writes hidden inside scripts such as `node -e`. It also misses a test run that targets the wrong package. Claude Code's turn comes from its transcript; for Cursor, Gemini CLI and Codex, whose transcript formats are not public, cto keeps its own log of commands and edits, and a command counts as successful unless a failure event arrives.
 - **Loop detection knows about edits, but only through the agent's edit tools.** A first re-run after a code edit is a new attempt, while the same error coming back across repeated fixes still counts as a loop; each loop is blocked once, so the agent can still verify its next fix. A file changed only through a shell command is not seen as an edit, and failures expire after 15 minutes.
 - **Each agent shell command waits for one Jev request.** OpenRouter answered in about 0.3 s in our tests, Cloudflare in about 0.9 s with occasional spikes past 3 s. Agent checks wait up to 5 s before failing open.
 

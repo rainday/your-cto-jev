@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { relative } from 'node:path';
 import { maskSensitiveState } from './masker.js';
+import type { TurnAction } from './types.js';
 import { shellWrites } from './shellwrites.js';
 
 // Reads a Claude Code transcript (JSONL) and summarises the current turn for the end-of-turn "done?" check.
 
-export type Action = { kind: 'edit'; file: string } | { kind: 'run'; command: string; ok: boolean; tail: string };
+export type Action = TurnAction;
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 // Edits that no local test could check: docs, CI and other YAML config.

@@ -362,6 +362,15 @@ export const personaDict = {
       </ul>
     </div>
 
+    <h2>10.6 shell 改檔、校準工具、其他 agent 的完成前檢查（v0.7）</h2>
+    <div class="note">
+      <ul>
+        <li><strong>shell 改檔：</strong><code>shellWrites()</code> 以規則辨識 <code>sed -i</code>、<code>perl -pi</code>、重新導向、<code>tee</code>、<code>cp</code>/<code>mv</code>/<code>rm</code>、<code>git apply</code>、<code>patch</code> 與 <code>--write</code>/<code>--fix</code> 格式化工具（不算 <code>2&gt;&amp;1</code>、<code>&gt;/dev/null</code>、<code>2&gt;file</code>）。死循環偵測在執行前的檢查中標記失敗紀錄（四家都有）；完成前檢查把成功的寫檔指令列為改檔，排在該指令之前。<code>node -e</code> 這類腳本內的寫檔看不到。</li>
+        <li><strong>校準工具：</strong><code>calibration/*.json</code> 收錄目前所有手寫題庫（含 train/holdout），像金鑰的值以佔位符儲存、執行時填入假值；<code>npm run calibrate</code> 直接使用發佈的題目與狀態組法（<code>Q</code>、<code>loopState</code>、<code>turnState</code>）。首次執行即發現 <code>destructive_command</code> 與 10/1 數字不同（force push 0.74、reset --hard 0.47），README 已更正；樣本仍小，預設門檻暫不調。<code>scripts/harvest-commands.mjs</code> 從 nebius/SWE-rebench-openhands-trajectories（CC-BY-4.0）抽出真實 agent 指令作為待標註候選，標註後自動納入校準。</li>
+        <li><strong>其他 agent 的完成前檢查：</strong>三家的對話紀錄格式未公開，改用 cto 自己的每 session 動作紀錄（<code>turns</code>）：執行前的檢查記下指令（及寫入的檔案），失敗事件標記該指令失敗，改檔事件記下檔案；結束事件時判斷並清空。Cursor 的 <code>stop</code> 沒有訊息內容，另接 <code>afterAgentResponse</code> 取得最後一段話，以 <code>followup_message</code> 讓 agent 繼續，<code>loop_count &gt; 0</code> 或非 <code>completed</code> 時不檢查；Gemini <code>AfterAgent</code>（<code>prompt_response</code>，exit 2 重試）；Codex <code>Stop</code>（<code>last_assistant_message</code>，exit 2）。沒有成功事件，沒收到失敗即視為成功。依官方文件實作並以文件格式測試，尚未在 agent 內實跑。Claude Code 維持讀對話紀錄。</li>
+      </ul>
+    </div>
+
     <h2>10.5 其他 agent 的改檔事件、預設順序與 CI 供應鏈（v0.5.2）</h2>
     <div class="note">
       <ul>

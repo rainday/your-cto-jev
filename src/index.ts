@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { agentNames, agents, type AgentName } from './agents.js';
 import { applyCredentials, findRoot, loadConfig, loadCredentials, loadPrefs, saveCredentials, savePrefs } from './brain.js';
 import { DEFAULT_ORDER, providerOrder, providers } from './api.js';
-import { agentEdit, agentPost, agentPre, agentStop, gitCommit, stagedDiff } from './hooks.js';
+import { agentEdit, agentPost, agentPre, agentReply, agentStop, gitCommit, stagedDiff } from './hooks.js';
 import { checkUpdate, currentVersion, runUpdate } from './update.js';
 import { doctor } from './doctor.js';
 import type { HookOutput } from './agents.js';
@@ -42,21 +42,26 @@ async function runHook(name: string): Promise<HookOutput> {
     return gitCommit(diff, { root, lang });
   }
   const raw = await readStdin();
-  const m = /^(claude|cursor|gemini|codex)-(pre|post|stop|edit)$/.exec(name);
+  const m = /^(claude|cursor|gemini|codex)-(pre|post|stop|edit|reply)$/.exec(name);
   if (!m) return { code: 0, stderr: [] };
   const agent = agents[m[1] as AgentName];
   let input: any = {};
   try { input = JSON.parse(raw); } catch { /* fail-open below */ }
   if (m[2] === 'edit') {
     const cwd = typeof input?.cwd === 'string' ? input.cwd : typeof input?.workspace_roots?.[0] === 'string' ? input.workspace_roots[0] : process.cwd();
-    return agentEdit(agent.parseEdit?.(input), { root: findRoot(cwd), lang });
+    return agentEdit(agent.parseEdit?.(input), { root: findRoot(cwd), lang }, agent.transcriptTurns ? undefined : agent.session(input));
+  }
+  if (m[2] === 'reply') {
+    if (!agent.parseReply) return { code: 0, stderr: [] };
+    const reply = agent.parseReply(input);
+    return agentReply(reply, { root: findRoot(reply.cwd ?? process.cwd()), lang });
   }
   if (m[2] === 'stop') {
     if (!agent.parseStop) return { code: 0, stderr: [] };
     const stop = agent.parseStop(input);
     const root = findRoot(stop.cwd ?? process.cwd());
     debug(root, maskSensitiveState(raw));
-    return agentStop(stop, { root, lang });
+    return agentStop(agent, stop, { root, lang });
   }
   if (m[2] === 'pre') {
     const pre = agent.parsePre(input);

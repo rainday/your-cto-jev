@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative } from 'node:path';
-import { agentNames, agents, hookCommand, type AgentName } from './agents.js';
+import { PHASES, agentNames, agents, hookCommand, type AgentName } from './agents.js';
 import { t, type Lang } from './i18n.js';
 import { guidancePaths, syncGuidance } from './skill.js';
 
@@ -55,7 +55,7 @@ function validShape(json: any, name: AgentName): boolean {
   if (json.hooks === undefined) return true;
   if (!isObj(json.hooks)) return false;
   const a = agents[name];
-  return [a.pre, a.post, a.stop, a.edit].every((spec) => !spec || json.hooks[spec.event] === undefined || Array.isArray(json.hooks[spec.event]));
+  return PHASES.map((p) => a[p]).every((spec) => !spec || json.hooks[spec.event] === undefined || Array.isArray(json.hooks[spec.event]));
 }
 
 function writeOrRemove(path: string, settings: any) {
@@ -69,7 +69,7 @@ function installAgent(settings: any, name: AgentName) {
   const a = agents[name];
   settings.hooks ??= {};
   if (a.style === 'cursor') settings.version ??= 1;
-  for (const phase of ['pre', 'post', 'stop', 'edit'] as const) {
+  for (const phase of PHASES) {
     const spec = a[phase];
     if (!spec) continue;
     const command = hookCommand(name, phase);
@@ -222,7 +222,7 @@ export function missingHooks(root: string): string[] {
   const missing: string[] = [];
   for (const n of wiredAgents(root)) {
     const text = readFileSync(join(root, agents[n].settings), 'utf8');
-    for (const phase of ['pre', 'post', 'stop', 'edit'] as const) {
+    for (const phase of PHASES) {
       if (agents[n][phase] && !text.includes(hookCommand(n, phase))) missing.push(hookCommand(n, phase));
     }
   }
