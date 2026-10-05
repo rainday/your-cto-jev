@@ -2,7 +2,7 @@
 
 **A sharp-tongued CTO that reviews what your AI coding agent is about to do, and says no.**
 
-`cto` hooks into `git commit` and into the shell tool of Claude Code, Cursor, Gemini CLI and Codex. Before a commit lands or a command runs, it asks [TypeSafe Jev](https://developers.cloudflare.com/ai/models/typesafe/jev/), a typed decision model, a few yes/no questions. Then it blocks, warns, or stays completely silent.
+`cto` hooks into `git commit` and into Claude Code, Cursor, Gemini CLI and Codex. Before a commit lands, before an agent runs a shell command, and when Claude Code says it is done, it asks [TypeSafe Jev](https://developers.cloudflare.com/ai/models/typesafe/jev/), a typed decision model, a few yes/no questions. Then it blocks, warns, or stays completely silent.
 
 ```text
 $ git commit -m "add payments"
@@ -15,7 +15,7 @@ $ git commit -m "add payments"
 
 # Same build fails twice, agent tries the exact same thing again
 [cto] Same error again. You are looping and burning tokens. This tool call is BLOCKED. Fix the logic first.
-      infinite_loop = 0.95 (threshold > 0.85)
+      infinite_loop = 0.95 (threshold > 0.6)
 ```
 
 Messages come in English or 繁體中文, picked from your locale.
@@ -50,18 +50,20 @@ When nothing crosses a threshold, `cto` prints nothing at all.
 
 ```mermaid
 flowchart TD
-    A["git commit"] --> B["Staged diff<br/>minus lock files, minified files, maps, binaries<br/>split into ~24k-token chunks"]
-    C["Agent shell command<br/>Claude Code · Cursor · Gemini CLI · Codex"] --> D["Command + failures from the last 15 min"]
-    E["Agent command failed"] --> F[("Error recorded locally<br/>no API call")]
+    A["git commit<br/>or cto check"] --> B["Staged diff (cto check: working tree<br/>when nothing is staged), minus lock files,<br/>minified files, maps, binaries · ~24k-token chunks"]
+    C["Agent shell command<br/>Claude Code · Cursor · Gemini CLI · Codex"] --> D["Command + failures from the last 15 min<br/>marked when code was edited since"]
+    E["Agent command failed"] --> F[("Failure log, kept locally<br/>edits mark entries · no API call")]
+    G["Agent edited a code file"] --> F
     F -.-> D
+    H["Claude Code ends a turn<br/>that edited code"] --> I["Final message + this turn's actions<br/>+ what ran after the last edit"]
     B --> M["Mask secrets<br/>keys, tokens, .env values"]
     D --> M
-    M --> P1{"Cloudflare<br/>Workers AI"}
-    P1 -- "answers" --> J{"Jev scores vs<br/>.cto.json thresholds"}
-    P1 -- "error, cooling down or no key" --> P2{"OpenRouter"}
-    P2 -- "answers" --> J
-    P2 -- "error or no key" --> O["Fail open<br/>let it through"]
-    J -- "secret, weakened tests,<br/>destructive or loop" --> X["BLOCK<br/>commit exit 1 · tool call exit 2"]
+    I --> M
+    M --> P1{"Providers in your order<br/>default: OpenRouter, TypeSafe, Cloudflare"}
+    P1 -- "answers" --> J{"Jev scores vs<br/>thresholds"}
+    P1 -- "error, cooling down or no key:<br/>next provider" --> P1
+    P1 -- "none left" --> O["Fail open<br/>let it through"]
+    J -- "secret, weakened tests,<br/>destructive, loop, or unverified done" --> X["BLOCK<br/>commit exit 1 · tool call or stop exit 2"]
     J -- "complex or off the sprint goal" --> W["Warn, then allow"]
     J -- "nothing crosses" --> S["Allow silently"]
 ```
@@ -106,7 +108,8 @@ Other forms:
 
 ```sh
 cto setup --agents claude,cursor --yes   # non-interactive (scripts, CI); only adds, never removes
-cto setup --uninstall                    # remove every cto hook again
+cto setup --refresh                      # re-write hooks and rules for the agents already set up
+cto setup --uninstall                    # remove every cto hook, rules block and skill again
 cto doctor                               # is it actually working?
 cto check                                # preview the commit checks on your current changes
 ```
@@ -182,6 +185,8 @@ Every check sends text to your chosen provider. `cto` masks it first:
 
 - **For commits:** the staged diff, with lock files, minified files, source maps and binaries removed.
 - **For agent commands:** the command, plus up to five failures from the last 15 minutes when checking for loops.
+- **When Claude Code ends a turn that edited code:** the agent's final message and a log of that turn: names of edited files, the shell commands it ran, whether each succeeded, and the last 200 characters of each output.
+- **For `cto check`:** the same as a commit; when nothing is staged, all working-tree changes, including the full content of new files git does not track yet.
 - **Always masked:** private key blocks, Stripe, OpenAI, AWS, GitHub and npm tokens, and any `NAME=value` whose name ends in `PASSWORD`, `SECRET`, `TOKEN` or `KEY`. Every value in a `.env` file is masked as well.
 
 Masking only controls what goes out. Jev still sees labels such as `[REDACTED: STRIPE_KEY]`, which is how it knows a real secret was there.
@@ -206,13 +211,14 @@ Defaults: `credential_leak` 0.5, `destructive_command` 0.7, `infinite_loop` 0.6,
 - **`sprint_goal`**: fill it in to enable the architecture check, for example `"Ship Stripe billing, no new services"`.
 - **Thresholds**: Jev returns a probability from 0 to 1. `code_complexity` is the exception: it is a score from 0 (clean) to 4 (unmaintainable).
 - **Calibration**: on 32 hand-written diffs, every one scoring above 0.8 for `test_tampering` really weakened the tests, and no legitimate change scored above 0.37. The 0.8 default caught 13 of 16 weakening diffs; the misses were subtle ones such as a meaningless float tolerance or a skip hidden behind an env var. Lower it to 0.5 to catch 15 of 16, at a higher risk of blocking honest commits.
+- `done_unverified` (0.6) and `infinite_loop` (0.6) were calibrated the same way; the measurements are in the design spec.
 - In the same way, `git push --force` scored about 0.50 for `destructive_command`, so the default lets it through. Lower that threshold to about 0.45 if you want force pushes blocked.
 
 `.cto-brain.json` holds personal runtime state and is gitignored.
 
 | Env var | Purpose |
 |---|---|
-| `CTO_PROVIDER` | Use only `cloudflare` or only `openrouter` |
+| `CTO_PROVIDER` | Use only one provider: `openrouter`, `typesafe` or `cloudflare` |
 | `CTO_FAILOVER=0` | Never switch providers |
 | `CTO_LANG` | `en` or `zh-TW` (default: your locale) |
 | `CTO_DEBUG=1` | Write masked hook input to `debug_stdin.json` |
