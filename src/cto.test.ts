@@ -781,3 +781,93 @@ test('a loop is blocked once per episode, so the agent can still verify its next
   assert.equal((await pre()).code, 2, 'a new failure can be blocked again');
   setKeys(false);
 });
+
+test('cto skill: written where each agent reads it, removed only when cto owns it', async () => {
+  const { SKILL_MARK } = await import('./skill.js');
+  const repo = tmp();
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  const claudeSkill = join(repo, '.claude', 'skills', 'cto', 'SKILL.md');
+  const sharedSkill = join(repo, '.agents', 'skills', 'cto', 'SKILL.md');
+
+  setup(repo, 'en', { agents: ['claude'] });
+  assert.ok(existsSync(claudeSkill) && !existsSync(sharedSkill), 'claude only: .claude/skills');
+  const text = readFileSync(claudeSkill, 'utf8');
+  assert.match(text, /^---\nname: cto\ndescription: /, 'standard SKILL.md frontmatter');
+  for (const s of ['credential_leak', 'test_tampering', 'done_unverified', 'infinite_loop', 'destructive_command', 'architecture_violation', 'code_complexity']) {
+    assert.ok(text.includes('`' + s + '`'), `every enforcing check has a rule: ${s}`);
+  }
+  assert.match(text, /cto check/);
+  assert.match(text, /--no-verify/);
+
+  setup(repo, 'en', { agents: ['cursor'] });
+  assert.ok(existsSync(sharedSkill) && existsSync(claudeSkill), 'additive: both now');
+  setup(repo, 'en', { agents: ['codex'], exact: true });
+  assert.ok(existsSync(sharedSkill) && !existsSync(claudeSkill), 'exact: claude copy removed');
+  assert.ok(!existsSync(join(repo, '.claude')), 'empty folders tidied');
+
+  // a user-authored skill with the same name is never deleted
+  mkdirSync(dirname(claudeSkill), { recursive: true });
+  writeFileSync(claudeSkill, '---\nname: cto\ndescription: mine\n---\n');
+  setup(repo, 'en', { uninstall: true });
+  assert.ok(existsSync(claudeSkill), 'not ours: kept');
+  assert.ok(!existsSync(sharedSkill), 'ours: removed');
+  assert.ok(!readFileSync(claudeSkill, 'utf8').includes(SKILL_MARK));
+});
+
+test('cto check: previews the commit checks on staged or working-tree changes, without touching the index', async () => {
+  const { pendingDiff, runCheck } = await import('./check.js');
+  const repo = tmp();
+  const g = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8' });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  writeFileSync(join(repo, 'a.ts'), 'export const a = 1;\n');
+  g('add', '.'); g('commit', '-qm', 'base');
+
+  writeFileSync(join(repo, 'a.ts'), 'export const a = 2;\n');
+  writeFileSync(join(repo, 'new.test.ts'), 'it.skip("x", () => {});\n');
+  let p = pendingDiff(repo);
+  assert.equal(p.source, 'working');
+  assert.match(p.diff, /diff --git a\/a\.ts b\/a\.ts/);
+  assert.match(p.diff, /new\.test\.ts/, 'untracked new files are included');
+  assert.equal(g('diff', '--cached', '--name-only').trim(), '', 'index untouched');
+
+  setKeys();
+  process.env.CTO_PROVIDER = 'openrouter';
+  let sent: any;
+  globalThis.fetch = (async (_u: string, init: any) => { sent = JSON.parse(init.body); return new Response(JSON.stringify(answers({ credential_leak: noul(0.02), test_tampering: noul(0.93), code_complexity: { type: 'score', score: 0.4 } }))); }) as any;
+  let r = await runCheck(repo, 'en');
+  const out = r.lines.join('\n');
+  assert.equal(r.code, 1, 'would block');
+  assert.ok(sent.questions.test_tampering, 'a test file changed, so the test check ran');
+  assert.match(out, /credential_leak\s+0\.02\s+blocks above 0\.5\s+ok/);
+  assert.match(out, /test_tampering\s+0\.93\s+blocks above 0\.8\s+WOULD BLOCK/);
+  assert.match(out, /architecture_violation\s+not checked: sprint_goal is empty/);
+  assert.match(out, /Fix the code, not the tests/);
+  assert.equal(loadBrain(repo).blocked_attempts, 0, 'a preview is not counted as a block');
+
+  g('add', 'a.ts');
+  p = pendingDiff(repo);
+  assert.equal(p.source, 'staged');
+  assert.ok(!p.diff.includes('new.test.ts'), 'staged changes only, like a real commit');
+  globalThis.fetch = (async () => new Response(JSON.stringify(answers({ credential_leak: noul(0.02), code_complexity: { type: 'score', score: 0.4 } })))) as any;
+  r = await runCheck(repo, 'en');
+  assert.equal(r.code, 0);
+  assert.match(r.lines.join('\n'), /test_tampering\s+not checked: no test files changed/);
+  assert.match(r.lines.join('\n'), /Good to commit/);
+  setKeys(false);
+});
+
+test('doctor shows when the last answered check ran', async () => {
+  const { doctor } = await import('./doctor.js');
+  const { countCheck } = await import('./hooks.js');
+  const repo = tmp();
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  setup(repo, 'en', { agents: ['claude'] });
+  let text = (await doctor(repo, 'en')).lines.join('\n');
+  assert.match(text, /No successful check yet/);
+  const b = loadBrain(repo);
+  countCheck(b, () => Date.now() - 3 * 60_000);
+  countCheck(b, () => Date.now() - 3 * 60_000);
+  saveBrain(repo, b);
+  text = (await doctor(repo, 'en')).lines.join('\n');
+  assert.match(text, /Last check: 3 min ago, 2 in total/);
+});

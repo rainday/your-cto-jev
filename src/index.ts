@@ -126,6 +126,17 @@ if (args[0] === '--hook' && args[1]) {
 } else if (args[0] === 'update') {
   process.exitCode = runUpdate();
   if (!process.exitCode) console.log(t(lang, 'update_done'));
+} else if (args[0] === 'check') {
+  const root = gitRoot(process.cwd());
+  if (!root) {
+    process.stderr.write(t(lang, 'setup_not_git') + '\n');
+    process.exitCode = 1;
+  } else {
+    const { runCheck } = await import('./check.js');
+    const r = await runCheck(root, lang);
+    console.log(r.lines.join('\n'));
+    process.exitCode = r.code;
+  }
 } else if (args[0] === 'doctor') {
   const r = await doctor(process.cwd(), lang);
   console.log(r.lines.join('\n'));

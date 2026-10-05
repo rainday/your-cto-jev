@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, relative } from 'node:path';
 import { agentNames, agents, hookCommand, type AgentName } from './agents.js';
 import { t, type Lang } from './i18n.js';
+import { syncSkills } from './skill.js';
 
 const START = '# >>> YOUR CTO JEV START >>>';
 const END = '# <<< YOUR CTO JEV END <<<';
@@ -155,6 +156,7 @@ export function setup(cwd: string, lang: Lang, opts: SetupOptions = {}): { code:
         lines.push(t(lang, 'uninstall_gitignore'));
       }
     }
+    for (const p of syncSkills(root, new Set(), true).removed) lines.push(t(lang, 'uninstall_skill', { path: p }));
     lines.push(t(lang, 'uninstall_done'));
     return { code: 0, lines };
   }
@@ -187,6 +189,11 @@ export function setup(cwd: string, lang: Lang, opts: SetupOptions = {}): { code:
     const note = agents[name].note;
     if (note) lines.push(t(lang, note));
   }
+
+  // 2b. The cto skill (rules for the agent), for the chosen agents.
+  const skills = syncSkills(root, chosen, !!opts.exact);
+  for (const p of skills.written) lines.push(t(lang, 'setup_skill', { path: p }));
+  for (const p of skills.removed) lines.push(t(lang, 'uninstall_skill', { path: p }));
 
   // 3. .gitignore block.
   writeFileSync(ignorePath, appendBlock(existsSync(ignorePath) ? readFileSync(ignorePath, 'utf8') : '', IGNORE_BODY));

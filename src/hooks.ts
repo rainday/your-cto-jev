@@ -128,55 +128,83 @@ export interface Env { root: string; lang: Lang; now?: () => number }
 
 // ---------- git-commit ----------
 
-export async function gitCommit(rawDiff: string, { root, lang, now }: Env): Promise<HookOutput> {
-  const cfg = loadConfig(root);
-  const brain = loadBrain(root);
-  const out: HookOutput = { code: 0, stderr: [] };
-  const files = filterDiff(maskDiff(rawDiff));
-  if (!files.length) return out;
+export interface DiffReview {
+  files: number;
+  scores: Partial<Record<Signal, number>>; // highest value per signal across chunks, only for signals Jev answered
+  asked: Set<Signal>;
+  failed: boolean; // at least one chunk could not be checked (fail-open)
+  noKeys: boolean;
+  notices: Set<string>;
+}
 
+/** Run the commit checks on a diff. Shared by the git hook and `cto check`. Mutates brain only for provider state. */
+export async function reviewDiff(rawDiff: string, cfg: CtoConfig, brain: Brain, lang: Lang, now?: () => number): Promise<DiffReview | null> {
+  const files = filterDiff(maskDiff(rawDiff));
+  if (!files.length) return null;
   const chunks = chunkDiff(files);
   const soft: Record<string, JevQuestion> = { code_complexity: Q.code_complexity };
   if (cfg.sprint_goal.trim()) soft.architecture_violation = architectureQ(cfg.sprint_goal.trim());
 
   const notices = new Set<string>();
+  const asked = new Set<Signal>();
   const ctx = { brain, lang, timeoutMs: 5000, notices, now };
   // Credential check on every chunk (no sampling); test check on chunks that touch tests; soft signals on the first chunk only. Max 3 in flight.
-  const results: EvalResult[] = await pool(chunks, 3, (state, i) =>
-    evaluate({
-      state,
-      questions: {
-        credential_leak: Q.credential_leak,
-        ...(touchesTests(state) && { test_tampering: Q.test_tampering }),
-        ...(i === 0 && soft),
-      },
-    }, ctx),
-  );
+  const results: EvalResult[] = await pool(chunks, 3, (state, i) => {
+    const questions: Record<string, JevQuestion> = {
+      credential_leak: Q.credential_leak,
+      ...(touchesTests(state) && { test_tampering: Q.test_tampering }),
+      ...(i === 0 && soft),
+    };
+    for (const k of Object.keys(questions)) asked.add(k as Signal);
+    return evaluate({ state, questions }, ctx);
+  });
 
-  if (results.some((r) => !r.ok)) brain.skipped_attempts++;
-  if (results.some((r) => !r.ok && r.reason === 'no_keys')) notices.add(t(lang, 'no_keys'));
-  // No session concept in git: while degraded (non-primary provider), say so on every commit.
-  const primary = providerOrder()[0];
-  for (const r of results) if (r.ok && r.provider !== primary) notices.add(t(lang, 'using', { name: providers[r.provider].label }));
-
-  const lines: string[] = [];
-  for (const s of ['credential_leak', 'test_tampering'] as const) {
-    const hits = results.flatMap((r) => (r.ok ? [exceeded(r.answers, s, cfg)] : [])).filter((v) => v !== undefined);
-    if (!hits.length) continue;
-    out.code = 1;
-    lines.push(...verdict(lang, s, Math.max(...hits), cfg, 'red'));
-  }
-  if (out.code) brain.blocked_attempts++;
-  const first = results[0];
-  if (first?.ok) {
-    for (const s of ['architecture_violation', 'code_complexity'] as const) {
-      const v = exceeded(first.answers, s, cfg);
-      if (v !== undefined) lines.push(...verdict(lang, s, v, cfg, 'yellow'));
+  const scores: Partial<Record<Signal, number>> = {};
+  for (const r of results) {
+    if (!r.ok) continue;
+    for (const [k, a] of Object.entries(r.answers)) {
+      const v = value(a);
+      if (v !== undefined && asked.has(k as Signal)) scores[k as Signal] = Math.max(scores[k as Signal] ?? -Infinity, v);
     }
   }
-  out.stderr = [...notices, ...lines];
+  // No session concept in git: while degraded (non-primary provider), say so on every run.
+  const primary = providerOrder()[0];
+  for (const r of results) if (r.ok && r.provider !== primary) notices.add(t(lang, 'using', { name: providers[r.provider].label }));
+  const noKeys = results.some((r) => !r.ok && r.reason === 'no_keys');
+  if (noKeys) notices.add(t(lang, 'no_keys'));
+  return { files: files.length, scores, asked, failed: results.some((r) => !r.ok), noKeys, notices };
+}
+
+export const BLOCKING_COMMIT: Signal[] = ['credential_leak', 'test_tampering'];
+export const WARNING_COMMIT: Signal[] = ['architecture_violation', 'code_complexity'];
+const over = (v: number | undefined, s: Signal, cfg: CtoConfig) => v !== undefined && v > cfg.thresholds[s];
+
+export async function gitCommit(rawDiff: string, { root, lang, now }: Env): Promise<HookOutput> {
+  const cfg = loadConfig(root);
+  const brain = loadBrain(root);
+  const out: HookOutput = { code: 0, stderr: [] };
+  const review = await reviewDiff(rawDiff, cfg, brain, lang, now);
+  if (!review) return out;
+  if (review.failed) brain.skipped_attempts++;
+  if (Object.keys(review.scores).length) countCheck(brain, now);
+
+  const lines: string[] = [];
+  for (const s of BLOCKING_COMMIT) {
+    if (!over(review.scores[s], s, cfg)) continue;
+    out.code = 1;
+    lines.push(...verdict(lang, s, review.scores[s]!, cfg, 'red'));
+  }
+  if (out.code) brain.blocked_attempts++;
+  for (const s of WARNING_COMMIT) if (over(review.scores[s], s, cfg)) lines.push(...verdict(lang, s, review.scores[s]!, cfg, 'yellow'));
+  out.stderr = [...review.notices, ...lines];
   saveBrain(root, brain);
   return out;
+}
+
+/** Bookkeeping for `cto doctor`: how many checks Jev actually answered, and when the last one was. */
+export function countCheck(brain: Brain, now?: () => number) {
+  brain.checks = (brain.checks ?? 0) + 1;
+  brain.last_check_at = new Date((now ?? Date.now)()).toISOString();
 }
 
 // ---------- pre (Bash / shell command gate, any agent) ----------
@@ -215,6 +243,7 @@ export async function agentPre(agent: Agent, input: PreInput, { root, lang, now 
   const { sessionId } = input;
   const r = await evaluate({ state, questions, ...(sessionId && { session_id: sessionId }) }, { brain, lang, timeoutMs: AGENT_TIMEOUT_MS, notices, now });
   if (!r.ok) brain.skipped_attempts++;
+  else countCheck(brain, now);
   await sessionNotice(brain, sessionId, lang, r, notices);
 
   let out: HookOutput = { code: 0, stderr: [] };
@@ -256,6 +285,7 @@ export async function agentStop(input: StopInput, { root, lang, now }: Env): Pro
     { brain, lang, timeoutMs: AGENT_TIMEOUT_MS, notices: new Set(), now },
   );
   if (!r.ok) brain.skipped_attempts++;
+  else countCheck(brain, now);
   const v = r.ok ? exceeded(r.answers, 'done_unverified', cfg) : undefined;
   if (v !== undefined) {
     brain.blocked_attempts++;

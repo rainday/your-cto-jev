@@ -35,6 +35,13 @@
       <li>語言偏好存於個人設定檔（<code>CTO_LANG</code> 仍優先）。</li>
       <li>互動流程以 PassThrough 串流送入真實按鍵序列做自動測試。</li>
     </ul>
+    <h3>1.2 cto skill 與 cto check（v0.5 新增）</h3>
+    <ul>
+      <li><strong>skill：</strong>開發規矩寫給 coding agent 看，規則與檢查一對一：每條規則都寫明由哪個檢查執行，每個會擋或警告的檢查都有對應規則。另教 agent commit 前先跑 <code>cto check</code>，被擋時照訊息修正，不准用 <code>--no-verify</code>、改 hook 或改門檻繞過，覺得誤判就停下來交給使用者決定。</li>
+      <li><strong>位置：</strong>四家都用 SKILL.md 標準（frontmatter <code>name</code>、<code>description</code>）。Claude Code 讀 <code>.claude/skills/cto/</code>；Codex 讀 <code>.agents/skills/</code>；Gemini CLI 讀 <code>.gemini/skills/</code> 或 <code>.agents/skills/</code>；Cursor 讀 <code>.cursor/skills/</code>、<code>.agents/skills/</code>，也相容 <code>.claude/skills/</code>。因此同一份內容寫兩處即可涵蓋四家。檔內有管理標記，只移除 cto 自己寫的檔案，使用者自寫的同名 skill 不刪。</li>
+      <li><strong><code>cto check</code>：</strong>不 commit，以與 git hook 相同的評估（共用 <code>reviewDiff</code>）檢查待提交內容並列出每個分數與門檻：有 staged 就檢查 staged，否則檢查工作目錄所有改動含未追蹤的新檔，不修改 index。會擋下時 exit 1。預覽不計入擋下次數。</li>
+      <li><strong>doctor：</strong>記錄 Jev 實際回答的檢查次數與最後時間（<code>checks</code>、<code>last_check_at</code>），顯示「最近一次檢查：3 分鐘前，累計 N 次」。</li>
+    </ul>
     <h3>1.1 多 agent 與互動式安裝（v1.1 新增）</h3>
     <ul>
       <li><strong>互動式精靈：</strong>在終端機執行 <code>cto setup</code> 時，逐一詢問要接哪些 agent（偵測到 <code>~/.claude</code>、<code>~/.cursor</code>、<code>~/.gemini</code>、<code>~/.codex</code> 者預設 yes），再詢問 key 並以一次真實請求驗證。不做圖形介面：工具本身活在終端機與 agent 裡，GUI 只會多出依賴。</li>

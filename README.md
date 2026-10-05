@@ -100,7 +100,7 @@ Then restart your agent session so it picks up the new hooks, and check that eve
 cto doctor
 ```
 
-`cto doctor` sends one real request per provider, shows where each key comes from, checks the hooks in the current repo, and counts how often a check was blocked or let through unchecked. It exits non-zero when something needs attention. Run it whenever you are unsure whether `cto` is protecting you: because `cto` fails open, a broken key looks exactly like a clean pass.
+`cto doctor` sends one real request per provider, shows where each key comes from, checks the hooks in the current repo, shows when the last check ran, and counts how often a check was blocked or let through unchecked. It exits non-zero when something needs attention. Run it whenever you are unsure whether `cto` is protecting you: because `cto` fails open, a broken key looks exactly like a clean pass.
 
 Other forms:
 
@@ -108,9 +108,37 @@ Other forms:
 cto setup --agents claude,cursor --yes   # non-interactive (scripts, CI); only adds, never removes
 cto setup --uninstall                    # remove every cto hook again
 cto doctor                               # is it actually working?
+cto check                                # preview the commit checks on your current changes
 ```
 
 `setup` appends marked blocks and merges JSON. It never overwrites your existing hooks or settings, and `--uninstall` puts them back exactly as they were. It never touches your shell rc files.
+
+## The rules, written down for the agent
+
+`cto setup` also installs a **cto skill**: the development rules of the repo, written for coding agents, where every rule names the check that enforces it. Agents read it before they work, so they get blocked less, and when they are blocked they know why and how to fix it.
+
+| Rule | Enforced by |
+|---|---|
+| Secrets stay out of code | `credential_leak` blocks the commit |
+| Fix the code, not the tests | `test_tampering` blocks the commit |
+| Done means verified | `done_unverified` sends the agent back to work |
+| Two strikes, change approach | `infinite_loop` blocks the retry once |
+| Ask before anything irreversible | `destructive_command` blocks the command |
+| Stay on the sprint goal | `architecture_violation` warns |
+| Keep it simple | `code_complexity` warns |
+
+The skill also tells the agent to run `cto check` before committing, and never to bypass a block with `--no-verify` or by editing thresholds. It is written to `.claude/skills/cto/` for Claude Code and `.agents/skills/cto/` for Codex, Gemini CLI and Cursor; commit it so the whole team's agents follow the same rules.
+
+`cto check` runs the commit checks on your staged changes (or, if nothing is staged, on every working-tree change including new files) without committing, and prints each score next to its threshold:
+
+```text
+[cto] Nothing staged, checking the working tree instead (9 files, including new untracked files):
+  credential_leak         0.03   blocks above 0.5  ok
+  test_tampering          0.03   blocks above 0.8  ok
+  architecture_violation  not checked: sprint_goal is empty in .cto.json
+  code_complexity         2.02   warns above 2  would warn
+[cto] Good to commit.
+```
 
 ## Supported agents
 

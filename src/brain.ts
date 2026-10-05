@@ -18,6 +18,8 @@ export interface Brain {
   failover_count: number;
   provider_cooldown: Record<string, Cooldown>;
   notified_sessions: string[];
+  checks?: number; // checks Jev answered (any hook)
+  last_check_at?: string;
 }
 
 export const DEFAULT_CONFIG: CtoConfig = {

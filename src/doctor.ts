@@ -74,6 +74,13 @@ export async function doctor(cwd: string, lang: Lang): Promise<{ code: number; l
 
     const brain = loadBrain(root);
     L.push(`  -- ${t(lang, 'doc_stats', { blocked: brain.blocked_attempts, skipped: brain.skipped_attempts })}`);
+    if (brain.last_check_at) {
+      const mins = Math.max(0, Math.round((Date.now() - Date.parse(brain.last_check_at)) / 60_000));
+      const ago = mins < 60 ? t(lang, 'ago_min', { n: mins }) : mins < 1440 ? t(lang, 'ago_hour', { n: Math.round(mins / 60) }) : t(lang, 'ago_day', { n: Math.round(mins / 1440) });
+      L.push(`  OK ${t(lang, 'doc_last_check', { ago, n: brain.checks ?? 0 })}`);
+    } else {
+      L.push(`  -- ${t(lang, 'doc_never_checked')}`);
+    }
     for (const [p, cd] of Object.entries(brain.provider_cooldown)) {
       if (cd.until > Date.now()) L.push(`  !! ${t(lang, 'doc_cooldown', { name: providers[p]?.label ?? p, status: cd.status, until: new Date(cd.until).toLocaleTimeString() })}`);
     }
