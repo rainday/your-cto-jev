@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, relative } from 'node:path';
 import { agentNames, agents, hookCommand, type AgentName } from './agents.js';
 import { t, type Lang } from './i18n.js';
-import { syncGuidance } from './skill.js';
+import { guidancePaths, syncGuidance } from './skill.js';
 
 const START = '# >>> YOUR CTO JEV START >>>';
 const END = '# <<< YOUR CTO JEV END <<<';
@@ -193,6 +193,9 @@ export function setup(cwd: string, lang: Lang, opts: SetupOptions = {}): { code:
   // 2b. The cto skill (rules for the agent), for the chosen agents.
   const skills = syncGuidance(root, chosen, !!opts.exact);
   for (const p of skills.written) lines.push(t(lang, 'setup_skill', { path: p }));
+  const hidden = ignoredByGit(root, guidancePaths(chosen));
+  // Advise git add -f: a .gitignore negation cannot re-include a file whose parent folder is excluded (git rule).
+  if (hidden.length) lines.push(t(lang, 'setup_ignored', { list: hidden.join(', '), cmd: `git add -f ${hidden.join(' ')}` }));
   for (const p of skills.removed) lines.push(t(lang, 'uninstall_skill', { path: p }));
 
   // 3. .gitignore block.
@@ -224,6 +227,16 @@ export function missingHooks(root: string): string[] {
     }
   }
   return missing;
+}
+
+/**
+ * Paths git would ignore. cto's rules are meant to be committed so every teammate's agent follows them; a repo
+ * .gitignore that excludes them (often a broad rule like .agents/skills/) silently keeps them on one machine.
+ */
+export function ignoredByGit(root: string, paths: string[]): string[] {
+  return paths.filter((p) => {
+    try { execFileSync('git', ['check-ignore', '-q', p], { cwd: root, stdio: 'ignore' }); return true; } catch { return false; }
+  });
 }
 
 /** Agents whose config in this repo currently calls cto. */

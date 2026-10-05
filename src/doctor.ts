@@ -2,12 +2,12 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agents } from './agents.js';
-import { probeProvider, providers } from './api.js';
+import { probeProvider, providerOrder, providers } from './api.js';
 import { loadBrain, loadConfig, loadCredentials } from './brain.js';
 import { AGENT_TIMEOUT_MS } from './hooks.js';
 import { t, type Lang } from './i18n.js';
-import { missingHooks, wiredAgents } from './setup.js';
-import { staleGuidance } from './skill.js';
+import { ignoredByGit, missingHooks, wiredAgents } from './setup.js';
+import { guidancePaths, staleGuidance } from './skill.js';
 import { checkUpdate, currentVersion } from './update.js';
 
 function hint(provider: string, status: string): string {
@@ -18,8 +18,12 @@ function hint(provider: string, status: string): string {
   return 'doc_hint_other';
 }
 
+const isTracked = (root: string, p: string) => {
+  try { execFileSync('git', ['ls-files', '--error-unmatch', p], { cwd: root, stdio: 'ignore' }); return true; } catch { return false; }
+};
+
 /** One screen answering "is cto actually working here?". Exit 1 when it is not. */
-export async function doctor(cwd: string, lang: Lang): Promise<{ code: number; lines: string[] }> {
+export async function doctor(cwd: string, lang: Lang, slowMs = AGENT_TIMEOUT_MS): Promise<{ code: number; lines: string[] }> {
   const L: string[] = [];
   const problems: string[] = [];
   const latest = await checkUpdate();
@@ -29,6 +33,7 @@ export async function doctor(cwd: string, lang: Lang): Promise<{ code: number; l
   L.push('', t(lang, 'doc_keys'));
   const file = loadCredentials() as Record<string, string | undefined>;
   let working = 0;
+  const primary = providerOrder()[0];
   for (const name of Object.keys(providers)) {
     const label = providers[name].label;
     const missing = providers[name].keys.filter((k) => !process.env[k]);
@@ -43,9 +48,12 @@ export async function doctor(cwd: string, lang: Lang): Promise<{ code: number; l
     const ms = Math.round(performance.now() - start);
     if (r.ok) {
       working++;
-      const slow = ms > AGENT_TIMEOUT_MS;
-      L.push(`  ${slow ? '!!' : 'OK'} ${label} (${source}): ${t(lang, 'doc_ok', { ms })}${slow ? '  ' + t(lang, 'doc_slow', { limit: AGENT_TIMEOUT_MS / 1000 }) : ''}`);
-      if (slow) problems.push(t(lang, 'doc_slow', { limit: AGENT_TIMEOUT_MS / 1000 }));
+      // Only the provider tried first decides whether checks finish in time; a slow backup is worth a note, not a failure.
+      const slow = ms > slowMs;
+      const mark = !slow ? 'OK' : name === primary ? '!!' : '--';
+      const note = !slow ? '' : '  ' + t(lang, name === primary ? 'doc_slow' : 'doc_slow_backup', { limit: slowMs / 1000 });
+      L.push(`  ${mark} ${label} (${source}): ${t(lang, 'doc_ok', { ms })}${note}`);
+      if (slow && name === primary) problems.push(t(lang, 'doc_slow', { limit: slowMs / 1000 }));
     } else {
       L.push(`  !! ${label} (${source}): ${t(lang, 'doc_fail', { status: r.status })} ${r.message ?? ''}`.trimEnd());
       L.push(`     ${t(lang, hint(name, r.status))}`);
@@ -69,6 +77,9 @@ export async function doctor(cwd: string, lang: Lang): Promise<{ code: number; l
 
     const wired = wiredAgents(root);
     L.push(`  ${wired.length ? 'OK' : '--'} ${t(lang, 'doc_agents', { list: wired.map((n) => agents[n].label).join(', ') || t(lang, 'doc_none') })}`);
+    // Only files git ignores AND does not track yet: once added with -f they are tracked and fine.
+    const hidden = ignoredByGit(root, guidancePaths(wired)).filter((p) => !isTracked(root, p));
+    if (hidden.length) L.push(`  -- ${t(lang, 'doc_ignored', { list: hidden.join(', '), cmd: `git add -f ${hidden.join(' ')}` })}`);
     const stale = [...missingHooks(root), ...staleGuidance(root, wired)];
     if (stale.length) {
       L.push(`  !! ${t(lang, 'doc_stale', { list: stale.join(', ') })}`);

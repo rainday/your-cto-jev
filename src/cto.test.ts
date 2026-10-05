@@ -887,3 +887,40 @@ test('doctor shows when the last answered check ran', async () => {
   text = (await doctor(repo, 'en')).lines.join('\n');
   assert.match(text, /Last check: 3 min ago, 2 in total/);
 });
+
+test('doctor: a slow backup is a note, a slow primary is a problem; rules ignored by git are flagged', async () => {
+  const { doctor } = await import('./doctor.js');
+  const { ignoredByGit } = await import('./setup.js');
+  const repo = tmp();
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  writeFileSync(join(repo, '.gitignore'), '.agents/skills/\n');
+  const lines = setup(repo, 'en', { agents: ['claude'] }).lines.join('\n');
+  assert.match(lines, /\.agents\/skills\/cto\/SKILL\.md is ignored by \.gitignore[\s\S]*git add -f \.agents\/skills\/cto\/SKILL\.md/, 'setup warns and shows a fix that always works');
+  assert.deepEqual(ignoredByGit(repo, ['CLAUDE.md', '.agents/skills/cto/SKILL.md']), ['.agents/skills/cto/SKILL.md']);
+
+  setKeys();
+  const wrapped = (a: unknown) => ({ result: { state: 'Completed', result: a } });
+  globalThis.fetch = (async (url: string) => {
+    const cf = String(url).includes('cloudflare');
+    if (cf) await new Promise((r) => setTimeout(r, 120));
+    return new Response(JSON.stringify(cf ? wrapped(answers({ probe: noul(0.9) })) : answers({ probe: noul(0.9) })));
+  }) as any;
+  savePrefs({ provider_order: ['openrouter', 'cloudflare'] });
+  let d = await doctor(repo, 'en', 60);
+  let text = d.lines.join('\n');
+  assert.match(text, /-- Cloudflare .*this backup provider took longer/);
+  assert.match(text, /\.agents\/skills\/cto\/SKILL\.md is ignored by \.gitignore/);
+  assert.equal(d.code, 0, 'slow backup and ignored rules do not fail doctor');
+
+  savePrefs({ provider_order: ['cloudflare', 'openrouter'] });
+  d = await doctor(repo, 'en', 60);
+  text = d.lines.join('\n');
+  assert.match(text, /!! Cloudflare .*slower than the 0\.06 s agent timeout/);
+  assert.equal(d.code, 1, 'slow primary fails doctor');
+  // the advised fix works even though the parent folder is ignored, and then doctor stops flagging it
+  execFileSync('git', ['add', '-f', '.agents/skills/cto/SKILL.md'], { cwd: repo });
+  text = (await doctor(repo, 'en', 60)).lines.join('\n');
+  assert.ok(!/is ignored by \.gitignore/.test(text), 'tracked after git add -f: no longer flagged');
+  savePrefs({});
+  setKeys(false);
+});

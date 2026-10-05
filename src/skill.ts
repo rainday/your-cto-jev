@@ -129,6 +129,13 @@ export function syncGuidance(root: string, chosen: Set<AgentName>, removeOthers:
   return { written, removed };
 }
 
+/** The guidance files the given agents use (what should be committed for them). */
+export function guidancePaths(agentsInUse: Iterable<AgentName>): string[] {
+  const set = new Set(agentsInUse);
+  if (!set.size) return [];
+  return [...MEMORY_FILES.filter((m) => m.agents.some((a) => set.has(a))).map((m) => m.path), SKILL_PATH];
+}
+
 /** Guidance files that are missing or differ from what this version would write, for the given agents. */
 export function staleGuidance(root: string, agentsInUse: AgentName[]): string[] {
   if (!agentsInUse.length) return [];
