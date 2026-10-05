@@ -16,7 +16,7 @@ const claudePre = (i: any, e: any) => agentPre(agents.claude, agents.claude.pars
 const claudePost = (i: any, e: any) => agentPost(agents.claude.parsePost(i), e);
 import { detectLang } from './i18n.js';
 import { maskDiff, maskSensitiveState } from './masker.js';
-import { setSprintGoal, setup } from './setup.js';
+import { setSprintGoal, setup, wiredAgents } from './setup.js';
 
 const loadBrainCd = (b: any) => b.provider_cooldown.cloudflare;
 process.env.CTO_NO_UPDATE_CHECK = '1'; // tests never hit the registry or write the user's cache
@@ -782,36 +782,52 @@ test('a loop is blocked once per episode, so the agent can still verify its next
   setKeys(false);
 });
 
-test('cto skill: written where each agent reads it, removed only when cto owns it', async () => {
-  const { SKILL_MARK } = await import('./skill.js');
+test('guidance: rules block in always-loaded files, one skill, only cto content touched, staleness detected', async () => {
+  const { RULES_BLOCK, SKILL_TEXT, staleGuidance } = await import('./skill.js');
+  const { missingHooks } = await import('./setup.js');
   const repo = tmp();
   execFileSync('git', ['init', '-q'], { cwd: repo });
-  const claudeSkill = join(repo, '.claude', 'skills', 'cto', 'SKILL.md');
-  const sharedSkill = join(repo, '.agents', 'skills', 'cto', 'SKILL.md');
+  const read = (p: string) => readFileSync(join(repo, p), 'utf8');
+  writeFileSync(join(repo, 'CLAUDE.md'), '# My project\n\nUse pnpm.\n');
 
   setup(repo, 'en', { agents: ['claude'] });
-  assert.ok(existsSync(claudeSkill) && !existsSync(sharedSkill), 'claude only: .claude/skills');
-  const text = readFileSync(claudeSkill, 'utf8');
-  assert.match(text, /^---\nname: cto\ndescription: /, 'standard SKILL.md frontmatter');
+  assert.ok(read('CLAUDE.md').startsWith('# My project\n\nUse pnpm.\n'), 'user content kept');
+  assert.ok(read('CLAUDE.md').includes(RULES_BLOCK), 'rules block appended');
+  assert.ok(!existsSync(join(repo, 'AGENTS.md')) && !existsSync(join(repo, 'GEMINI.md')), 'only files the chosen agents read');
+  assert.equal(read('.agents/skills/cto/SKILL.md'), SKILL_TEXT, 'one detailed skill');
+  assert.ok(!existsSync(join(repo, '.claude', 'skills')), 'no second copy for Cursor to see twice');
   for (const s of ['credential_leak', 'test_tampering', 'done_unverified', 'infinite_loop', 'destructive_command', 'architecture_violation', 'code_complexity']) {
-    assert.ok(text.includes('`' + s + '`'), `every enforcing check has a rule: ${s}`);
+    assert.ok(RULES_BLOCK.includes('`' + s + '`') && SKILL_TEXT.includes('`' + s + '`'), `every check has a rule: ${s}`);
   }
-  assert.match(text, /cto check/);
-  assert.match(text, /--no-verify/);
+  assert.match(RULES_BLOCK, /\.agents\/skills\/cto\/SKILL\.md/, 'block points every agent, including Claude Code, to the skill');
 
-  setup(repo, 'en', { agents: ['cursor'] });
-  assert.ok(existsSync(sharedSkill) && existsSync(claudeSkill), 'additive: both now');
-  setup(repo, 'en', { agents: ['codex'], exact: true });
-  assert.ok(existsSync(sharedSkill) && !existsSync(claudeSkill), 'exact: claude copy removed');
-  assert.ok(!existsSync(join(repo, '.claude')), 'empty folders tidied');
+  setup(repo, 'en', { agents: ['claude'] });
+  assert.equal(read('CLAUDE.md').split('YOUR CTO JEV START').length, 2, 'idempotent');
 
-  // a user-authored skill with the same name is never deleted
-  mkdirSync(dirname(claudeSkill), { recursive: true });
-  writeFileSync(claudeSkill, '---\nname: cto\ndescription: mine\n---\n');
+  setup(repo, 'en', { agents: ['gemini', 'cursor'] });
+  assert.ok(read('GEMINI.md').includes(RULES_BLOCK) && read('AGENTS.md').includes(RULES_BLOCK));
+  setup(repo, 'en', { agents: ['gemini'], exact: true });
+  assert.ok(!existsSync(join(repo, 'AGENTS.md')), 'exact: block removed, file we created removed');
+  assert.equal(read('CLAUDE.md'), '# My project\n\nUse pnpm.\n', 'exact: user file restored exactly');
+
+  // staleness: edited rules or a hook phase missing from an older install
+  setup(repo, 'en', { agents: ['claude'] });
+  assert.deepEqual(staleGuidance(repo, ['claude']), []);
+  writeFileSync(join(repo, '.agents/skills/cto/SKILL.md'), 'old text');
+  assert.deepEqual(staleGuidance(repo, ['claude']), ['.agents/skills/cto/SKILL.md']);
+  const settingsPath = join(repo, '.claude', 'settings.local.json');
+  const s = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  delete s.hooks.PostToolUse;
+  writeFileSync(settingsPath, JSON.stringify(s));
+  assert.deepEqual(missingHooks(repo), ['cto --hook claude-edit']);
+  // what --refresh does: re-run setup for the agents already wired, adding only
+  setup(repo, 'en', { agents: wiredAgents(repo) });
+  assert.deepEqual(missingHooks(repo), []);
+  assert.deepEqual(staleGuidance(repo, ['claude']), []);
+
   setup(repo, 'en', { uninstall: true });
-  assert.ok(existsSync(claudeSkill), 'not ours: kept');
-  assert.ok(!existsSync(sharedSkill), 'ours: removed');
-  assert.ok(!readFileSync(claudeSkill, 'utf8').includes(SKILL_MARK));
+  assert.equal(read('CLAUDE.md'), '# My project\n\nUse pnpm.\n');
+  assert.ok(!existsSync(join(repo, '.agents')) && !existsSync(join(repo, 'GEMINI.md')));
 });
 
 test('cto check: previews the commit checks on staged or working-tree changes, without touching the index', async () => {

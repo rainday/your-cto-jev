@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentNames, agents, type AgentName } from './agents.js';
@@ -91,7 +92,11 @@ if (args[0] === '--hook' && args[1]) {
   let goal: string | undefined;
   const root = gitRoot(process.cwd());
   const list = flag('--agents');
-  if (list) chosen = list.split(',').map((s) => s.trim()).filter((s): s is AgentName => (agentNames as string[]).includes(s));
+  if (args.includes('--refresh')) {
+    // Re-write everything cto manages for the agents already wired here; choices stay as they are.
+    chosen = root ? wiredAgents(root) : [];
+    if (root && !chosen.length) { console.log(t(lang, 'refresh_none')); process.exit(0); }
+  } else if (list) chosen = list.split(',').map((s) => s.trim()).filter((s): s is AgentName => (agentNames as string[]).includes(s));
   else if (!uninstall && root && process.stdin.isTTY && process.stdout.isTTY && !args.includes('--yes')) {
     // Interactive: start from what is actually set up now, so re-running setup edits instead of starting over.
     const fileKeys = loadCredentials();
@@ -125,7 +130,15 @@ if (args[0] === '--hook' && args[1]) {
   process.exitCode = r.code;
 } else if (args[0] === 'update') {
   process.exitCode = runUpdate();
-  if (!process.exitCode) console.log(t(lang, 'update_done'));
+  if (!process.exitCode) {
+    console.log(t(lang, 'update_done'));
+    // The new version refreshes this repo's managed hooks and rules, so changes reach it without re-running setup.
+    const root = gitRoot(process.cwd());
+    if (root && wiredAgents(root).length) {
+      console.log(t(lang, 'refresh_after_update'));
+      spawnSync('cto setup --refresh', { stdio: 'inherit', shell: true, cwd: root });
+    }
+  }
 } else if (args[0] === 'check') {
   const root = gitRoot(process.cwd());
   if (!root) {

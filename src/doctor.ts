@@ -6,7 +6,8 @@ import { probeProvider, providers } from './api.js';
 import { loadBrain, loadConfig, loadCredentials } from './brain.js';
 import { AGENT_TIMEOUT_MS } from './hooks.js';
 import { t, type Lang } from './i18n.js';
-import { wiredAgents } from './setup.js';
+import { missingHooks, wiredAgents } from './setup.js';
+import { staleGuidance } from './skill.js';
 import { checkUpdate, currentVersion } from './update.js';
 
 function hint(provider: string, status: string): string {
@@ -68,6 +69,11 @@ export async function doctor(cwd: string, lang: Lang): Promise<{ code: number; l
 
     const wired = wiredAgents(root);
     L.push(`  ${wired.length ? 'OK' : '--'} ${t(lang, 'doc_agents', { list: wired.map((n) => agents[n].label).join(', ') || t(lang, 'doc_none') })}`);
+    const stale = [...missingHooks(root), ...staleGuidance(root, wired)];
+    if (stale.length) {
+      L.push(`  !! ${t(lang, 'doc_stale', { list: stale.join(', ') })}`);
+      problems.push(t(lang, 'doc_stale', { list: stale.join(', ') }));
+    }
 
     const cfg = loadConfig(root);
     L.push(`  -- ${t(lang, cfg.sprint_goal.trim() ? 'doc_goal_set' : 'doc_goal_empty')}`);

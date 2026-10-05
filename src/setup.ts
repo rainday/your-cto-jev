@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, relative } from 'node:path';
 import { agentNames, agents, hookCommand, type AgentName } from './agents.js';
 import { t, type Lang } from './i18n.js';
-import { syncSkills } from './skill.js';
+import { syncGuidance } from './skill.js';
 
 const START = '# >>> YOUR CTO JEV START >>>';
 const END = '# <<< YOUR CTO JEV END <<<';
@@ -156,7 +156,7 @@ export function setup(cwd: string, lang: Lang, opts: SetupOptions = {}): { code:
         lines.push(t(lang, 'uninstall_gitignore'));
       }
     }
-    for (const p of syncSkills(root, new Set(), true).removed) lines.push(t(lang, 'uninstall_skill', { path: p }));
+    for (const p of syncGuidance(root, new Set(), true).removed) lines.push(t(lang, 'uninstall_skill', { path: p }));
     lines.push(t(lang, 'uninstall_done'));
     return { code: 0, lines };
   }
@@ -191,7 +191,7 @@ export function setup(cwd: string, lang: Lang, opts: SetupOptions = {}): { code:
   }
 
   // 2b. The cto skill (rules for the agent), for the chosen agents.
-  const skills = syncSkills(root, chosen, !!opts.exact);
+  const skills = syncGuidance(root, chosen, !!opts.exact);
   for (const p of skills.written) lines.push(t(lang, 'setup_skill', { path: p }));
   for (const p of skills.removed) lines.push(t(lang, 'uninstall_skill', { path: p }));
 
@@ -212,6 +212,18 @@ export function setup(cwd: string, lang: Lang, opts: SetupOptions = {}): { code:
   if (!String(goal).trim()) lines.push(t(lang, 'setup_sprint'));
   lines.push(t(lang, 'setup_done'));
   return { code: 0, lines };
+}
+
+/** Hook phases a wired agent should have but its config lacks (installed by an older version). */
+export function missingHooks(root: string): string[] {
+  const missing: string[] = [];
+  for (const n of wiredAgents(root)) {
+    const text = readFileSync(join(root, agents[n].settings), 'utf8');
+    for (const phase of ['pre', 'post', 'stop', 'edit'] as const) {
+      if (agents[n][phase] && !text.includes(hookCommand(n, phase))) missing.push(hookCommand(n, phase));
+    }
+  }
+  return missing;
 }
 
 /** Agents whose config in this repo currently calls cto. */

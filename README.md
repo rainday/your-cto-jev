@@ -115,7 +115,9 @@ cto check                                # preview the commit checks on your cur
 
 ## The rules, written down for the agent
 
-`cto setup` also installs a **cto skill**: the development rules of the repo, written for coding agents, where every rule names the check that enforces it. Agents read it before they work, so they get blocked less, and when they are blocked they know why and how to fix it.
+`cto setup` also writes the development rules of the repo for coding agents, where every rule names the check that enforces it. Agents read them before they work, so they get blocked less, and when they are blocked they know why and how to fix it.
+
+The rules go where agents always look: a short marked block appended to `CLAUDE.md` (Claude Code), `AGENTS.md` (Codex, Cursor) and `GEMINI.md` (Gemini CLI), only for the agents you picked. Your own content in those files is left alone, and uninstall takes out exactly the block. The details, including what each check looks for and how to handle a block, live in one skill at `.agents/skills/cto/SKILL.md`; the rules block points every agent there.
 
 | Rule | Enforced by |
 |---|---|
@@ -127,7 +129,7 @@ cto check                                # preview the commit checks on your cur
 | Stay on the sprint goal | `architecture_violation` warns |
 | Keep it simple | `code_complexity` warns |
 
-The skill also tells the agent to run `cto check` before committing, and never to bypass a block with `--no-verify` or by editing thresholds. It is written to `.claude/skills/cto/` for Claude Code and `.agents/skills/cto/` for Codex, Gemini CLI and Cursor; commit it so the whole team's agents follow the same rules.
+The rules also tell the agent to run `cto check` before committing, and never to bypass a block with `--no-verify` or by editing thresholds. Commit these files so the whole team's agents follow the same rules. `cto update` refreshes them (and any new hooks) in the repo you run it from; `cto doctor` flags a repo whose rules or hooks are older than the installed version, and `cto setup --refresh` brings it up to date.
 
 `cto check` runs the commit checks on your staged changes (or, if nothing is staged, on every working-tree change including new files) without committing, and prints each score next to its threshold:
 
