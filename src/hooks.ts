@@ -213,7 +213,7 @@ export async function agentPre(agent: Agent, input: PreInput, { root, lang, now 
   let out: HookOutput = { code: 0, stderr: [] };
   if (r.ok) {
     for (const s of ['destructive_command', 'infinite_loop'] as const) {
-      const v = exceeded(r.answers, s, cfg);
+      const v = questions[s] ? exceeded(r.answers, s, cfg) : undefined; // only judge what was asked
       if (v === undefined) continue;
       brain.blocked_attempts++;
       out = agent.block([...verdict(lang, s, v, cfg, null), ...notices]);
@@ -258,6 +258,20 @@ export async function agentStop(input: StopInput, { root, lang, now }: Env): Pro
 // ---------- post (failure recording) ----------
 
 /** Record the failure only; never calls Jev. No error field, no record. */
+/**
+ * After the agent edits a file, earlier failures describe code that no longer exists: forget them, so re-running the
+ * same command after a fix is not mistaken for a loop. Local only: no Jev call, no network. Any edit counts as a new
+ * attempt, even an unrelated one; that can miss a loop but never blocks a real fix.
+ */
+export function agentEdit({ root }: Env): HookOutput {
+  const brain = loadBrain(root);
+  if (brain.recent_errors.length) {
+    brain.recent_errors = [];
+    saveBrain(root, brain);
+  }
+  return { code: 0, stderr: [] };
+}
+
 export function agentPost(input: PostInput | null, { root }: Env): HookOutput {
   if (!input) return { code: 0, stderr: [] };
   const brain = loadBrain(root);

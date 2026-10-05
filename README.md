@@ -196,7 +196,7 @@ Nothing else is uploaded, and nothing is logged unless you set `CTO_DEBUG=1`. Th
 
 - **Git GUIs hide warnings.** VS Code, SourceTree and GitKraken usually hide hook output when the commit succeeds, so the architecture and complexity warnings are invisible there. Blocks still show.
 - **The done check only sees edits made with the agent's edit tools.** A file changed through a shell command (for example `sed`) does not count as an edit, so that turn is not checked. It also misses a test run that targets the wrong package. It runs in Claude Code only for now.
-- **A retry after a fix can look like a loop.** The loop check sees recent failures but not the edits you made since. Failures expire after 15 minutes. Raise `infinite_loop` if it gets in your way.
+- **Loop detection forgets failures once the agent edits a file**, so re-running a command after a fix is not treated as a loop. In Claude Code this uses the agent's edit tools; a file changed only through a shell command does not reset it, and failures also expire after 15 minutes.
 - **Each agent shell command waits for one Jev request.** OpenRouter answered in about 0.3 s in our tests, Cloudflare in about 0.9 s with occasional spikes past 3 s. Agent checks wait up to 5 s before failing open.
 
 ## Development

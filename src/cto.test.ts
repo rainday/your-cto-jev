@@ -678,3 +678,39 @@ test('done check: parses the current turn from the transcript, gates on code edi
   setup(repo, 'en', { uninstall: true });
   assert.ok(!existsSync(settingsPath));
 });
+
+test('after an edit, earlier failures no longer count: re-running the same command after a fix is not a loop', async () => {
+  const { agentEdit } = await import('./hooks.js');
+  setKeys();
+  process.env.CTO_PROVIDER = 'openrouter';
+  let sent: any;
+  globalThis.fetch = (async (_u: string, init: any) => { sent = JSON.parse(init.body); return new Response(JSON.stringify(answers({ destructive_command: noul(0.01), infinite_loop: noul(0.95) }))); }) as any;
+  const root = tmp();
+  const env = { root, lang: 'en' as const };
+  for (let i = 0; i < 2; i++) claudePost({ tool_input: { command: 'npm test' }, error: 'Exit code 1\nexpected 180, got 18000' }, env);
+
+  // without an edit in between, the retry is checked as a possible loop (and blocked here)
+  let out = await claudePre({ session_id: 'L', tool_input: { command: 'npm test' } }, env);
+  assert.ok(sent.questions.infinite_loop);
+  assert.equal(out.code, 2);
+
+  // the agent fixes the code, then re-runs the same command
+  agentEdit(env);
+  assert.equal(loadBrain(root).recent_errors.length, 0);
+  out = await claudePre({ session_id: 'L', tool_input: { command: 'npm test' } }, env);
+  assert.equal(sent.questions.infinite_loop, undefined, 'no loop question after a fix');
+  assert.equal(out.code, 0);
+  setKeys(false);
+
+  // setup wires the edit hook next to the user's own PostToolUse hooks, and removes only ours
+  const repo = tmp();
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  mkdirSync(join(repo, '.claude'));
+  const mine = { hooks: { PostToolUse: [{ matcher: 'Write', hooks: [{ type: 'command', command: 'prettier --write' }] }] } };
+  writeFileSync(join(repo, '.claude', 'settings.local.json'), JSON.stringify(mine));
+  setup(repo, 'en', { agents: ['claude'] });
+  const s = JSON.parse(readFileSync(join(repo, '.claude', 'settings.local.json'), 'utf8'));
+  assert.deepEqual(s.hooks.PostToolUse[1], { matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: 'cto --hook claude-edit' }] });
+  setup(repo, 'en', { uninstall: true });
+  assert.deepEqual(JSON.parse(readFileSync(join(repo, '.claude', 'settings.local.json'), 'utf8')), mine);
+});

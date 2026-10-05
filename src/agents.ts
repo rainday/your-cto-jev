@@ -16,6 +16,7 @@ export interface Agent {
   pre: { event: string; matcher?: string };
   post?: { event: string; matcher?: string };
   stop?: { event: string; matcher?: string }; // end-of-turn "done?" check; only agents whose stop hook is verified
+  edit?: { event: string; matcher?: string }; // after a file edit: old failures no longer count as a loop
   note?: string; // i18n key printed after install
   parsePre(i: any): PreInput;
   parsePost(i: any): PostInput | null;
@@ -53,6 +54,7 @@ export const agents: Record<AgentName, Agent> = {
     pre: { event: 'PreToolUse', matcher: 'Bash' },
     post: { event: 'PostToolUseFailure', matcher: 'Bash' },
     stop: { event: 'Stop' },
+    edit: { event: 'PostToolUse', matcher: 'Edit|Write|MultiEdit|NotebookEdit' },
     parseStop: (i) => ({
       sessionId: str(i?.session_id),
       cwd: str(i?.cwd),
@@ -122,5 +124,5 @@ export const agents: Record<AgentName, Agent> = {
 };
 
 export const agentNames = Object.keys(agents) as AgentName[];
-export type Phase = 'pre' | 'post' | 'stop';
+export type Phase = 'pre' | 'post' | 'stop' | 'edit';
 export const hookCommand = (agent: AgentName, phase: Phase) => `cto --hook ${agent}-${phase}`;

@@ -57,6 +57,7 @@
       <tbody>
         <tr><td>git pre-commit</td><td><code>git rev-parse --path-format=absolute --git-path hooks</code>（已涵蓋 <code>core.hooksPath</code> 與 worktree）。若結果是 husky 自動產生的 <code>.husky/_</code>，改寫 <code>.husky/pre-commit</code>，因為 <code>.husky/_</code> 會被 husky 重建</td><td><code>cto --hook git-commit</code>。<code>cto</code> 自己以固定參數執行 <code>git diff --cached --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/</code>，不讀 stdin（agent 的 shell 可能給一個永不關閉的 pipe）。區塊內不放任何邏輯，套件更新即全部生效；0.1.0 的舊區塊仍會 pipe diff 進來，會被忽略，同樣生效</td><td>審查 staged 程式碼</td></tr>
         <tr><td>Claude <code>PreToolUse</code>（matcher <code>Bash</code>）</td><td><code>.claude/settings.local.json</code></td><td><code>cto --hook claude-pre</code></td><td>審查即將執行的指令</td></tr>
+        <tr><td>Claude <code>PostToolUse</code>（matcher <code>Edit|Write|MultiEdit|NotebookEdit</code>）</td><td><code>.claude/settings.local.json</code></td><td><code>cto --hook claude-edit</code></td><td>改檔後清空 <code>recent_errors</code>，修正後重跑不算死循環（v0.4.3）</td></tr>
         <tr><td>Claude <code>PostToolUseFailure</code>（matcher <code>Bash</code>）</td><td><code>.claude/settings.local.json</code></td><td><code>cto --hook claude-post</code></td><td>只記錄失敗輸出，不呼叫 Jev</td></tr>
       </tbody>
     </table>
@@ -332,7 +333,7 @@ export const personaDict = {
           </table>
           <p>預設 0.7 擋住明確破壞、放過 <code>node_modules</code> 清理，但 <code>git push --force</code>（0.50）也會放過。若團隊要擋 force push，把門檻降到 0.45 左右。</p>
           <p><code>credential_leak</code>：遮罩後的 <code>[REDACTED: STRIPE_KEY]</code> 在簡短 instructions 下只拿到 0.53，貼著 0.5 門檻。instructions 明講「REDACTED 標籤代表真實金鑰」並說明 <code>.env</code> 規則後，端到端實測升到 0.94；<code>process.env.X</code> 引用為 0.04、README 範例 <code>sk_test_xxx</code> 為 0.02。</p>
-          <p><code>infinite_loop</code>：同一指令連兩次同樣錯誤後重跑，得 0.95。<strong>已知風險：</strong>修正程式碼後重跑同一指令也長得一樣，Jev 看不到中間的編輯，可能誤擋。根因解是增加 <code>PostToolUse</code>（matcher <code>Edit|Write</code>）在編輯後清空 <code>recent_errors</code>；v1 未做，先靠門檻調整。</p></li>
+          <p><code>infinite_loop</code>：同一指令連兩次同樣錯誤後重跑，得 0.95。<strong>已知風險：</strong>修正程式碼後重跑同一指令也長得一樣，Jev 看不到中間的編輯，可能誤擋。根因解已於 v0.4.3 實作：Claude Code 的 <code>PostToolUse</code>（matcher <code>Edit|Write|MultiEdit|NotebookEdit</code>）執行 <code>cto --hook claude-edit</code>，編輯後清空 <code>recent_errors</code>。只在本機寫檔，不呼叫 Jev，實測約 0.17 秒。任何編輯都視為新嘗試，可能漏抓但不會誤擋修正後的重跑。</p></li>
         <li><strong>延遲：</strong>OpenRouter 13 次請求 p50 241ms、p95 326ms，遠低於 claude 端 2 秒逾時，不需調整。整個 <code>claude-pre</code> hook（含 Node 啟動）實測約 0.5 秒。Cloudflare 因 403 未能量測成功路徑（首次 403 回應花了 2.9 秒，之後的 403 都在 2 秒內。若超過 2 秒會以逾時計，冷卻 5 分鐘而非 1 小時，仍會轉移）。</li>
       </ol>
     </div>
