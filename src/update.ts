@@ -48,7 +48,8 @@ export async function checkUpdate(timeoutMs = 1000, now = Date.now()): Promise<s
 /** npm install -g your-cto-jev@latest, output streamed to the terminal. */
 export function runUpdate(): number {
   // npm is npm.cmd on Windows, which needs a shell. One constant command string: nothing user-supplied is interpolated.
-  const r = spawnSync(`npm install -g ${PKG}@latest`, { stdio: 'inherit', shell: true });
+  // --prefer-online: right after a release the local npm cache may not list the new version yet (ETARGET).
+  const r = spawnSync(`npm install -g ${PKG}@latest --prefer-online`, { stdio: 'inherit', shell: true });
   try { writeFileSync(cachePath(), JSON.stringify({ checked_at: 0 }) + '\n'); } catch { /* cache is optional */ }
   return r.status ?? 1;
 }
