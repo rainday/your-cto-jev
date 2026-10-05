@@ -614,3 +614,67 @@ test('displayWidth counts CJK and full-width characters as two columns', () => {
   assert.equal(displayWidth('Jev providers 與 API key'), 24);
   assert.equal(displayWidth('（）'), 4);
 });
+
+test('done check: parses the current turn from the transcript, gates on code edits, blocks once, never loops', async () => {
+  const { turnActions, turnState } = await import('./turn.js');
+  const { agentStop } = await import('./hooks.js');
+  const dir = tmp();
+  const L = (o: unknown) => JSON.stringify(o);
+  const human = (text: string) => L({ type: 'user', message: { role: 'user', content: text } });
+  const use = (id: string, name: string, input: unknown) => L({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } });
+  const result = (id: string, content: string, is_error = false) => L({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content, is_error }] } });
+  const transcript = (lines: string[]) => { const p = join(dir, `t${Math.random()}.jsonl`); writeFileSync(p, lines.join('\n') + '\n'); return p; };
+
+  const p1 = transcript([
+    human('earlier request'), use('a0', 'Edit', { file_path: join(dir, 'old.ts') }), // previous turn: ignored
+    human('fix the discount bug'),
+    use('a1', 'Bash', { command: 'npm test' }), result('a1', 'Tests: 48 passed'),
+    use('a2', 'Edit', { file_path: join(dir, 'src', 'cart.ts') }), result('a2', 'ok'),
+    use('a3', 'Bash', { command: 'npm run lint' }), result('a3', 'Exit code 1\n2 problems', true),
+    use('a4', 'Bash', { command: 'sleep 999' }), // no result yet: ignored
+  ]);
+  const acts = turnActions(p1, dir);
+  assert.deepEqual(acts.map((a) => (a.kind === 'edit' ? `edit ${a.file}` : `run ${a.command} ${a.ok}`)), [
+    'run npm test true', `edit ${join('src', 'cart.ts')}`, 'run npm run lint false',
+  ]);
+  const state = turnState('Done, tests pass. key sk_live_' + 'a'.repeat(24), acts);
+  assert.match(state, /Fact: Commands that ran after the last code edit: npm run lint/);
+  assert.match(state, /-> FAILED/);
+  assert.ok(!state.includes('sk_live_'), 'state is masked');
+
+  setKeys();
+  process.env.CTO_PROVIDER = 'openrouter';
+  let calls = 0;
+  let reply = answers({ done_unverified: noul(0.9) });
+  globalThis.fetch = (async () => { calls++; return new Response(JSON.stringify(reply)); }) as any;
+  const root = tmp();
+  const stop = (transcriptPath: string, stopHookActive = false) =>
+    agentStop({ transcriptPath, cwd: dir, lastMessage: 'Done!', stopHookActive, sessionId: 's' }, { root, lang: 'en' });
+
+  let out = await stop(p1);
+  assert.equal(out.code, 2);
+  assert.match(out.stderr.join('\n'), /Done, you say\? Show me/);
+  assert.equal(calls, 1);
+
+  assert.deepEqual(await stop(p1, true), { code: 0, stderr: [] }, 'never blocks twice in a row');
+  const docsOnly = transcript([human('update docs'), use('d1', 'Edit', { file_path: join(dir, 'README.md') }), use('d2', 'Write', { file_path: join(dir, '.github', 'workflows', 'ci.yml') })]);
+  assert.deepEqual(await stop(docsOnly), { code: 0, stderr: [] }, 'docs/config-only turns are not checked');
+  const qa = transcript([human('where is the retry logic?'), use('q1', 'Bash', { command: 'rg retry' }), result('q1', 'src/queue.ts:12')]);
+  assert.deepEqual(await stop(qa), { code: 0, stderr: [] }, 'turns without edits are not checked');
+  assert.equal(calls, 1, 'gated turns never call Jev');
+
+  reply = answers({ done_unverified: noul(0.3) });
+  out = await stop(p1);
+  assert.equal(out.code, 0, '0.3 is below the 0.6 default');
+  setKeys(false);
+
+  // setup wires the Stop hook for Claude Code and removes it again
+  const repo = tmp();
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  setup(repo, 'en', { agents: ['claude'] });
+  const settingsPath = join(repo, '.claude', 'settings.local.json');
+  const s = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  assert.deepEqual(s.hooks.Stop, [{ hooks: [{ type: 'command', command: 'cto --hook claude-stop' }] }]);
+  setup(repo, 'en', { uninstall: true });
+  assert.ok(!existsSync(settingsPath));
+});

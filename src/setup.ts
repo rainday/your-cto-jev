@@ -55,7 +55,7 @@ function validShape(json: any, name: AgentName): boolean {
   if (json.hooks === undefined) return true;
   if (!isObj(json.hooks)) return false;
   const a = agents[name];
-  return [a.pre, a.post].every((spec) => !spec || json.hooks[spec.event] === undefined || Array.isArray(json.hooks[spec.event]));
+  return [a.pre, a.post, a.stop].every((spec) => !spec || json.hooks[spec.event] === undefined || Array.isArray(json.hooks[spec.event]));
 }
 
 function writeOrRemove(path: string, settings: any) {
@@ -69,7 +69,7 @@ function installAgent(settings: any, name: AgentName) {
   const a = agents[name];
   settings.hooks ??= {};
   if (a.style === 'cursor') settings.version ??= 1;
-  for (const phase of ['pre', 'post'] as const) {
+  for (const phase of ['pre', 'post', 'stop'] as const) {
     const spec = a[phase];
     if (!spec) continue;
     const command = hookCommand(name, phase);

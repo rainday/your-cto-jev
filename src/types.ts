@@ -26,4 +26,5 @@ export type Signal =
   | 'infinite_loop'
   | 'architecture_violation'
   | 'test_tampering'
+  | 'done_unverified'
   | 'code_complexity';

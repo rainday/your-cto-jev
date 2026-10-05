@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { agentNames, agents, type AgentName } from './agents.js';
 import { applyCredentials, findRoot, loadConfig, loadCredentials, loadPrefs, saveCredentials, savePrefs } from './brain.js';
 import { providerOrder, providers } from './api.js';
-import { agentPost, agentPre, gitCommit, stagedDiff } from './hooks.js';
+import { agentPost, agentPre, agentStop, gitCommit, stagedDiff } from './hooks.js';
 import { checkUpdate, currentVersion, runUpdate } from './update.js';
 import { doctor } from './doctor.js';
 import type { HookOutput } from './agents.js';
@@ -41,11 +41,18 @@ async function runHook(name: string): Promise<HookOutput> {
     return gitCommit(diff, { root, lang });
   }
   const raw = await readStdin();
-  const m = /^(claude|cursor|gemini|codex)-(pre|post)$/.exec(name);
+  const m = /^(claude|cursor|gemini|codex)-(pre|post|stop)$/.exec(name);
   if (!m) return { code: 0, stderr: [] };
   const agent = agents[m[1] as AgentName];
   let input: any = {};
   try { input = JSON.parse(raw); } catch { /* fail-open below */ }
+  if (m[2] === 'stop') {
+    if (!agent.parseStop) return { code: 0, stderr: [] };
+    const stop = agent.parseStop(input);
+    const root = findRoot(stop.cwd ?? process.cwd());
+    debug(root, maskSensitiveState(raw));
+    return agentStop(stop, { root, lang });
+  }
   if (m[2] === 'pre') {
     const pre = agent.parsePre(input);
     const root = findRoot(pre.cwd ?? process.cwd());

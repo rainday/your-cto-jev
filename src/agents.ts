@@ -4,6 +4,7 @@
 export interface HookOutput { code: number; stdout?: string; stderr: string[] }
 export interface PreInput { command?: string; sessionId?: string; cwd?: string }
 export interface PostInput { command: string; error: string; cwd?: string }
+export interface StopInput { sessionId?: string; cwd?: string; transcriptPath?: string; lastMessage: string; stopHookActive: boolean }
 
 export type AgentName = 'claude' | 'cursor' | 'gemini' | 'codex';
 
@@ -14,9 +15,11 @@ export interface Agent {
   style: 'nested' | 'cursor'; // nested = Claude-style {hooks:{Event:[{matcher,hooks:[...]}]}}
   pre: { event: string; matcher?: string };
   post?: { event: string; matcher?: string };
+  stop?: { event: string; matcher?: string }; // end-of-turn "done?" check; only agents whose stop hook is verified
   note?: string; // i18n key printed after install
   parsePre(i: any): PreInput;
   parsePost(i: any): PostInput | null;
+  parseStop?(i: any): StopInput;
   block(lines: string[]): HookOutput;
   notice(msgs: string[]): HookOutput;
 }
@@ -49,6 +52,14 @@ export const agents: Record<AgentName, Agent> = {
     style: 'nested',
     pre: { event: 'PreToolUse', matcher: 'Bash' },
     post: { event: 'PostToolUseFailure', matcher: 'Bash' },
+    stop: { event: 'Stop' },
+    parseStop: (i) => ({
+      sessionId: str(i?.session_id),
+      cwd: str(i?.cwd),
+      transcriptPath: str(i?.transcript_path),
+      lastMessage: String(i?.last_assistant_message ?? ''),
+      stopHookActive: i?.stop_hook_active === true,
+    }),
     parsePre: nestedPre,
     parsePost: (i) => (i?.is_interrupt || !str(i?.error) ? null : { command: cmdOf(i), error: i.error, cwd: str(i?.cwd) }),
     block: exit2Block,
@@ -111,4 +122,5 @@ export const agents: Record<AgentName, Agent> = {
 };
 
 export const agentNames = Object.keys(agents) as AgentName[];
-export const hookCommand = (agent: AgentName, phase: 'pre' | 'post') => `cto --hook ${agent}-${phase}`;
+export type Phase = 'pre' | 'post' | 'stop';
+export const hookCommand = (agent: AgentName, phase: Phase) => `cto --hook ${agent}-${phase}`;

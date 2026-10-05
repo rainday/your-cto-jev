@@ -34,10 +34,13 @@ Jev judges meaning and answers with probabilities, not prose. It costs about $0.
 | `test_tampering` | `git commit`s that touch tests or test config | **Blocks** the commit |
 | `destructive_command` | every agent shell command | **Blocks** the command |
 | `infinite_loop` | agent shell commands, after a recent failure | **Blocks** the command |
+| `done_unverified` | Claude Code ending a turn that edited code | **Sends it back to work** until the change is verified or the gap is disclosed |
 | `architecture_violation` | `git commit`, once you set a sprint goal | Warns only |
 | `code_complexity` | every `git commit` | Warns only |
 
 `test_tampering` catches the classic agent shortcut: making a red test green by skipping it, deleting its assertions, loosening the expectation, or lowering the coverage bar, instead of fixing the code. It lets through real fixes, new or tighter tests, refactors, and tests removed together with their feature.
+
+`done_unverified` catches the other classic shortcut: "Done, all tests pass!" when nothing ran after the last edit, the last run failed, or the claim is not backed by anything the agent actually did. It lets through turns that ran a passing check after the last edit, turns that changed only docs or CI config, and turns where the agent honestly says what it could not verify. It blocks at most once per stop, so it cannot loop.
 
 Architecture and complexity only warn on purpose. They are subjective, and a gate that blocks too often teaches people to use `git commit --no-verify`, which switches off the secret check too.
 
@@ -165,6 +168,7 @@ Nothing else is uploaded, and nothing is logged unless you set `CTO_DEBUG=1`. Th
   "thresholds": {
     "credential_leak": 0.5,
     "test_tampering": 0.8,
+    "done_unverified": 0.6,
     "destructive_command": 0.7,
     "infinite_loop": 0.85,
     "architecture_violation": 0.85,
@@ -191,6 +195,7 @@ Nothing else is uploaded, and nothing is logged unless you set `CTO_DEBUG=1`. Th
 ## Known limitations
 
 - **Git GUIs hide warnings.** VS Code, SourceTree and GitKraken usually hide hook output when the commit succeeds, so the architecture and complexity warnings are invisible there. Blocks still show.
+- **The done check only sees edits made with the agent's edit tools.** A file changed through a shell command (for example `sed`) does not count as an edit, so that turn is not checked. It also misses a test run that targets the wrong package. It runs in Claude Code only for now.
 - **A retry after a fix can look like a loop.** The loop check sees recent failures but not the edits you made since. Failures expire after 15 minutes. Raise `infinite_loop` if it gets in your way.
 - **Each agent shell command waits for one Jev request.** OpenRouter answered in about 0.3 s in our tests, Cloudflare in about 0.9 s with occasional spikes past 3 s. Agent checks wait up to 5 s before failing open.
 
