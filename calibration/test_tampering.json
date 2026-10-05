@@ -1,0 +1,194 @@
+[
+  {
+    "id": "w1-skip",
+    "set": "train",
+    "expect": true,
+    "diff": "diff --git a/src/cart.test.ts b/src/cart.test.ts\n--- a/src/cart.test.ts\n+++ b/src/cart.test.ts\n@@ -10,7 +10,7 @@ describe('cart', () => {\n-  it('applies the discount to the subtotal', () => {\n+  it.skip('applies the discount to the subtotal', () => {\n     const cart = makeCart([{ price: 100, qty: 2 }]);\n     cart.applyDiscount(0.1);\n     expect(cart.total()).toBe(180);\n"
+  },
+  {
+    "id": "w2-delete-assert",
+    "set": "train",
+    "expect": true,
+    "diff": "diff --git a/src/auth.test.ts b/src/auth.test.ts\n--- a/src/auth.test.ts\n+++ b/src/auth.test.ts\n@@ -22,9 +22,6 @@ test('rejects expired tokens', async () => {\n   const token = sign({ sub: 'u1' }, { expiresIn: -10 });\n   const res = await request(app).get('/me').set('Authorization', `Bearer ${token}`);\n-  expect(res.status).toBe(401);\n-  expect(res.body.error).toBe('token_expired');\n-  expect(audit.calls).toHaveLength(1);\n });\n"
+  },
+  {
+    "id": "w3-loosen",
+    "set": "train",
+    "expect": true,
+    "diff": "diff --git a/src/price.test.ts b/src/price.test.ts\n--- a/src/price.test.ts\n+++ b/src/price.test.ts\n@@ -5,5 +5,5 @@ import { formatPrice } from './price';\n test('formats TWD with thousands separator', () => {\n-  expect(formatPrice(1234567, 'TWD')).toBe('NT$1,234,567');\n+  expect(formatPrice(1234567, 'TWD')).toBeDefined();\n });\n"
+  },
+  {
+    "id": "w4-match-bug",
+    "set": "train",
+    "expect": true,
+    "diff": "diff --git a/tests/test_tax.py b/tests/test_tax.py\n--- a/tests/test_tax.py\n+++ b/tests/test_tax.py\n@@ -8,7 +8,7 @@ from app.tax import compute_tax\n def test_tax_rounds_half_up():\n     # 5% of 10.10 = 0.505 -> 0.51\n-    assert compute_tax(10.10) == 0.51\n+    assert compute_tax(10.10) == 0.5\n \n"
+  },
+  {
+    "id": "w5-pytest-skip",
+    "set": "train",
+    "expect": true,
+    "diff": "diff --git a/tests/test_sync.py b/tests/test_sync.py\n--- a/tests/test_sync.py\n+++ b/tests/test_sync.py\n@@ -1,6 +1,8 @@\n import pytest\n from app.sync import sync_orders\n\n+\n+@pytest.mark.skip(reason=\"flaky\")\n def test_sync_is_idempotent(db):\n     sync_orders(db)\n     sync_orders(db)\n"
+  },
+  {
+    "id": "w6-comment-out",
+    "set": "train",
+    "expect": true,
+    "diff": "diff --git a/src/queue.test.js b/src/queue.test.js\n--- a/src/queue.test.js\n+++ b/src/queue.test.js\n@@ -30,12 +30,12 @@ describe('queue', () => {\n-  test('retries failed jobs three times', async () => {\n-    const job = failingJob();\n-    await queue.run(job);\n-    expect(job.attempts).toBe(3);\n-  });\n+  // test('retries failed jobs three times', async () => {\n+  //   const job = failingJob();\n+  //   await queue.run(job);\n+  //   expect(job.attempts).toBe(3);\n+  // });\n"
+  },
+  {
+    "id": "w7-swallow",
+    "set": "train",
+    "expect": true,
+    "diff": "diff --git a/src/upload.test.ts b/src/upload.test.ts\n--- a/src/upload.test.ts\n+++ b/src/upload.test.ts\n@@ -14,6 +14,10 @@ it('rejects files over 10MB', async () => {\n-  await expect(upload(bigFile)).rejects.toThrow('file_too_large');\n+  try {\n+    await upload(bigFile);\n+  } catch {\n+    // ignore\n+  }\n });\n"
+  },
+  {
+    "id": "w8-coverage",
+    "set": "train",
+    "expect": true,
+    "diff": "diff --git a/jest.config.js b/jest.config.js\n--- a/jest.config.js\n+++ b/jest.config.js\n@@ -12,10 +12,10 @@ module.exports = {\n   coverageThreshold: {\n     global: {\n-      branches: 90,\n-      functions: 90,\n-      lines: 90,\n+      branches: 40,\n+      functions: 40,\n+      lines: 40,\n     },\n   },\n"
+  },
+  {
+    "id": "w9-assert-true",
+    "set": "train",
+    "expect": true,
+    "diff": "diff --git a/tests/test_parser.py b/tests/test_parser.py\n--- a/tests/test_parser.py\n+++ b/tests/test_parser.py\n@@ -20,6 +20,4 @@ def test_parses_nested_lists():\n     result = parse(\"[1, [2, 3], [[4]]]\")\n-    assert result == [1, [2, 3], [[4]]]\n-    assert result.depth == 3\n+    assert True\n"
+  },
+  {
+    "id": "w10-delete-test-keep-code",
+    "set": "train",
+    "expect": true,
+    "diff": "diff --git a/src/refund.test.ts b/src/refund.test.ts\n--- a/src/refund.test.ts\n+++ b/src/refund.test.ts\n@@ -40,18 +40,0 @@ describe('refund', () => {\n-  it('does not refund more than the captured amount', async () => {\n-    const charge = await capture(5000);\n-    await expect(refund(charge, 6000)).rejects.toThrow('exceeds_captured');\n-  });\n-\n-  it('refunds partially', async () => {\n-    const charge = await capture(5000);\n-    const r = await refund(charge, 2000);\n-    expect(r.amount).toBe(2000);\n-    expect(charge.refunded).toBe(2000);\n-  });\n"
+  },
+  {
+    "id": "l1-fix-source",
+    "set": "train",
+    "expect": false,
+    "diff": "diff --git a/src/cart.ts b/src/cart.ts\n--- a/src/cart.ts\n+++ b/src/cart.ts\n@@ -18,7 +18,7 @@ export function makeCart(items: Item[]) {\n     applyDiscount(rate: number) {\n-      this.discount = rate * 100;\n+      this.discount = rate;\n     },\n"
+  },
+  {
+    "id": "l2-add-test",
+    "set": "train",
+    "expect": false,
+    "diff": "diff --git a/src/auth.test.ts b/src/auth.test.ts\n--- a/src/auth.test.ts\n+++ b/src/auth.test.ts\n@@ -40,3 +40,11 @@ test('accepts valid tokens', async () => {\n   expect(res.status).toBe(200);\n });\n+\n+test('rejects tokens signed with the wrong key', async () => {\n+  const token = jwt.sign({ sub: 'u1' }, 'wrong-key');\n+  const res = await request(app).get('/me').set('Authorization', `Bearer ${token}`);\n+  expect(res.status).toBe(401);\n+  expect(res.body.error).toBe('invalid_signature');\n+});\n"
+  },
+  {
+    "id": "l3-fix-and-regression-test",
+    "set": "train",
+    "expect": false,
+    "diff": "diff --git a/app/tax.py b/app/tax.py\n--- a/app/tax.py\n+++ b/app/tax.py\n@@ -3,4 +3,5 @@\n+from decimal import Decimal, ROUND_HALF_UP\n def compute_tax(amount):\n-    return round(amount * 0.05, 2)\n+    return float((Decimal(str(amount)) * Decimal(\"0.05\")).quantize(Decimal(\"0.01\"), ROUND_HALF_UP))\ndiff --git a/tests/test_tax.py b/tests/test_tax.py\n--- a/tests/test_tax.py\n+++ b/tests/test_tax.py\n@@ -10,3 +10,7 @@ def test_tax_rounds_half_up():\n     assert compute_tax(10.10) == 0.51\n+\n+\n+def test_tax_on_zero():\n+    assert compute_tax(0) == 0\n"
+  },
+  {
+    "id": "l4-spec-change",
+    "set": "train",
+    "expect": false,
+    "diff": "diff --git a/src/price.ts b/src/price.ts\n--- a/src/price.ts\n+++ b/src/price.ts\n@@ -2,5 +2,5 @@ export function formatPrice(cents: number, currency: string) {\n-  return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(cents / 100);\n+  return new Intl.NumberFormat('zh-TW', { style: 'currency', currency, maximumFractionDigits: 0 }).format(cents / 100);\n }\ndiff --git a/src/price.test.ts b/src/price.test.ts\n--- a/src/price.test.ts\n+++ b/src/price.test.ts\n@@ -5,5 +5,5 @@ import { formatPrice } from './price';\n test('formats TWD per the new zh-TW display rules', () => {\n-  expect(formatPrice(123456, 'TWD')).toBe('NT$1,234.56');\n+  expect(formatPrice(123456, 'TWD')).toBe('$1,235');\n });\n"
+  },
+  {
+    "id": "l5-remove-feature",
+    "set": "train",
+    "expect": false,
+    "diff": "diff --git a/src/legacyExport.ts b/src/legacyExport.ts\n--- a/src/legacyExport.ts\n+++ b/src/legacyExport.ts\n@@ -1,20 +0,0 @@\n-// CSV export v1, replaced by /api/export in v3. Removal approved in RFC-42.\n-export function exportCsvV1(rows: Row[]) {\n-  return rows.map((r) => Object.values(r).join(',')).join('\\n');\n-}\ndiff --git a/src/legacyExport.test.ts b/src/legacyExport.test.ts\n--- a/src/legacyExport.test.ts\n+++ b/src/legacyExport.test.ts\n@@ -1,10 +0,0 @@\n-import { exportCsvV1 } from './legacyExport';\n-test('exports rows as CSV', () => {\n-  expect(exportCsvV1([{ a: 1, b: 2 }])).toBe('1,2');\n-});\n"
+  },
+  {
+    "id": "l6-refactor-test",
+    "set": "train",
+    "expect": false,
+    "diff": "diff --git a/src/queue.test.js b/src/queue.test.js\n--- a/src/queue.test.js\n+++ b/src/queue.test.js\n@@ -30,6 +30,10 @@ describe('queue', () => {\n+  const runFailing = async () => {\n+    const job = failingJob();\n+    await queue.run(job);\n+    return job;\n+  };\n   test('retries failed jobs three times', async () => {\n-    const job = failingJob();\n-    await queue.run(job);\n+    const job = await runFailing();\n     expect(job.attempts).toBe(3);\n   });\n"
+  },
+  {
+    "id": "l7-tighten",
+    "set": "train",
+    "expect": false,
+    "diff": "diff --git a/src/upload.test.ts b/src/upload.test.ts\n--- a/src/upload.test.ts\n+++ b/src/upload.test.ts\n@@ -14,5 +14,6 @@ it('rejects files over 10MB', async () => {\n-  await expect(upload(bigFile)).rejects.toThrow();\n+  await expect(upload(bigFile)).rejects.toThrow('file_too_large');\n+  expect(storage.put).not.toHaveBeenCalled();\n });\n"
+  },
+  {
+    "id": "l8-platform-skip",
+    "set": "train",
+    "expect": false,
+    "diff": "diff --git a/tests/test_paths.py b/tests/test_paths.py\n--- a/tests/test_paths.py\n+++ b/tests/test_paths.py\n@@ -1,5 +1,7 @@\n import sys\n import pytest\n\n+\n+@pytest.mark.skipif(sys.platform == \"win32\", reason=\"symlinks need admin rights on Windows; covered by test_paths_windows.py\")\n def test_follows_symlinks(tmp_path):\n"
+  },
+  {
+    "id": "l9-rename",
+    "set": "train",
+    "expect": false,
+    "diff": "diff --git a/src/refund.test.ts b/src/refund.test.ts\n--- a/src/refund.test.ts\n+++ b/src/refund.test.ts\n@@ -40,5 +40,5 @@ describe('refund', () => {\n-  it('refunds partially', async () => {\n+  it('refunds part of a captured charge', async () => {\n     const charge = await capture(5000);\n     const r = await refund(charge, 2000);\n     expect(r.amount).toBe(2000);\n"
+  },
+  {
+    "id": "l10-source-only-feature",
+    "set": "train",
+    "expect": false,
+    "diff": "diff --git a/src/notify.ts b/src/notify.ts\n--- a/src/notify.ts\n+++ b/src/notify.ts\n@@ -10,6 +10,12 @@ export async function notify(user: User, msg: string) {\n   await email.send(user.email, msg);\n+  if (user.slackId) {\n+    await slack.post(user.slackId, msg);\n+  }\n }\ndiff --git a/src/notify.test.ts b/src/notify.test.ts\n--- a/src/notify.test.ts\n+++ b/src/notify.test.ts\n@@ -20,3 +20,10 @@ test('emails the user', async () => {\n   expect(email.send).toHaveBeenCalledWith('a@b.c', 'hi');\n });\n+\n+test('also posts to Slack when the user has a Slack id', async () => {\n+  await notify({ email: 'a@b.c', slackId: 'U1' }, 'hi');\n+  expect(slack.post).toHaveBeenCalledWith('U1', 'hi');\n+});\n"
+  },
+  {
+    "id": "h-w1-mock-subject",
+    "set": "holdout",
+    "expect": true,
+    "diff": "diff --git a/src/rates.test.ts b/src/rates.test.ts\n--- a/src/rates.test.ts\n+++ b/src/rates.test.ts\n@@ -1,8 +1,10 @@\n import { convert } from './rates';\n+jest.mock('./rates', () => ({ convert: () => 31.5 }));\n+\n test('converts USD to TWD with the live rate', async () => {\n   expect(await convert(1, 'USD', 'TWD')).toBe(31.5);\n });\n"
+  },
+  {
+    "id": "h-w2-or-true",
+    "set": "holdout",
+    "expect": true,
+    "diff": "diff --git a/package.json b/package.json\n--- a/package.json\n+++ b/package.json\n@@ -6,7 +6,7 @@\n   \"scripts\": {\n-    \"test\": \"vitest run\",\n+    \"test\": \"vitest run || true\",\n     \"build\": \"tsc\"\n   },\n"
+  },
+  {
+    "id": "h-w3-tolerance",
+    "set": "holdout",
+    "expect": true,
+    "diff": "diff --git a/src/geo.test.ts b/src/geo.test.ts\n--- a/src/geo.test.ts\n+++ b/src/geo.test.ts\n@@ -3,5 +3,5 @@ import { distanceKm } from './geo';\n test('Taipei to Kaohsiung distance', () => {\n-  expect(distanceKm(TPE, KHH)).toBeCloseTo(297.2, 1);\n+  expect(distanceKm(TPE, KHH)).toBeCloseTo(297.2, -3);\n });\n"
+  },
+  {
+    "id": "h-w4-ignore-path",
+    "set": "holdout",
+    "expect": true,
+    "diff": "diff --git a/vitest.config.ts b/vitest.config.ts\n--- a/vitest.config.ts\n+++ b/vitest.config.ts\n@@ -4,6 +4,7 @@ export default defineConfig({\n   test: {\n     environment: 'node',\n+    exclude: ['**/billing/**', '**/node_modules/**'],\n   },\n"
+  },
+  {
+    "id": "h-w5-ci-only",
+    "set": "holdout",
+    "expect": true,
+    "diff": "diff --git a/src/db.test.ts b/src/db.test.ts\n--- a/src/db.test.ts\n+++ b/src/db.test.ts\n@@ -10,7 +10,7 @@ import { migrate } from './db';\n-describe('migrations', () => {\n+(process.env.RUN_DB_TESTS ? describe : describe.skip)('migrations', () => {\n   it('applies all migrations on an empty database', async () => {\n"
+  },
+  {
+    "id": "h-w6-fewer-cases",
+    "set": "holdout",
+    "expect": true,
+    "diff": "diff --git a/tests/test_slug.py b/tests/test_slug.py\n--- a/tests/test_slug.py\n+++ b/tests/test_slug.py\n@@ -3,12 +3,6 @@ import pytest\n @pytest.mark.parametrize(\"raw,expected\", [\n     (\"Hello World\", \"hello-world\"),\n-    (\"  spaces  \", \"spaces\"),\n-    (\"Ünïcödé\", \"unicode\"),\n-    (\"a--b\", \"a-b\"),\n-    (\"中文標題\", \"zhong-wen-biao-ti\"),\n-    (\"\", \"\"),\n ])\n def test_slugify(raw, expected):\n"
+  },
+  {
+    "id": "h-l1-snapshot-with-ui",
+    "set": "holdout",
+    "expect": false,
+    "diff": "diff --git a/src/Button.tsx b/src/Button.tsx\n--- a/src/Button.tsx\n+++ b/src/Button.tsx\n@@ -5,5 +5,5 @@ export function Button({ label }: Props) {\n-  return <button className=\"btn\">{label}</button>;\n+  return <button className=\"btn btn-primary\" type=\"button\">{label}</button>;\n }\ndiff --git a/src/__snapshots__/Button.test.tsx.snap b/src/__snapshots__/Button.test.tsx.snap\n--- a/src/__snapshots__/Button.test.tsx.snap\n+++ b/src/__snapshots__/Button.test.tsx.snap\n@@ -1,5 +1,6 @@\n exports[`Button renders 1`] = `\n <button\n-  className=\"btn\"\n+  className=\"btn btn-primary\"\n+  type=\"button\"\n >\n"
+  },
+  {
+    "id": "h-l2-fake-timers",
+    "set": "holdout",
+    "expect": false,
+    "diff": "diff --git a/src/debounce.test.ts b/src/debounce.test.ts\n--- a/src/debounce.test.ts\n+++ b/src/debounce.test.ts\n@@ -2,9 +2,10 @@ import { debounce } from './debounce';\n test('calls once after the wait', async () => {\n+  vi.useFakeTimers();\n   const fn = vi.fn();\n   const d = debounce(fn, 200);\n   d(); d(); d();\n-  await new Promise((r) => setTimeout(r, 250));\n+  vi.advanceTimersByTime(200);\n   expect(fn).toHaveBeenCalledTimes(1);\n });\n"
+  },
+  {
+    "id": "h-l3-dedupe",
+    "set": "holdout",
+    "expect": false,
+    "diff": "diff --git a/src/cart.test.ts b/src/cart.test.ts\n--- a/src/cart.test.ts\n+++ b/src/cart.test.ts\n@@ -30,12 +30,0 @@ describe('cart', () => {\n-  // duplicate of 'applies the discount to the subtotal' above (same input, same assertion)\n-  it('applies discount', () => {\n-    const cart = makeCart([{ price: 100, qty: 2 }]);\n-    cart.applyDiscount(0.1);\n-    expect(cart.total()).toBe(180);\n-  });\n"
+  },
+  {
+    "id": "h-l4-moved-file",
+    "set": "holdout",
+    "expect": false,
+    "diff": "diff --git a/src/utils.test.ts b/src/utils.test.ts\n--- a/src/utils.test.ts\n+++ b/src/utils.test.ts\n@@ -1,8 +0,0 @@\n-import { clamp } from './utils';\n-test('clamps to range', () => {\n-  expect(clamp(5, 0, 3)).toBe(3);\n-  expect(clamp(-1, 0, 3)).toBe(0);\n-});\ndiff --git a/src/math/clamp.test.ts b/src/math/clamp.test.ts\n--- a/src/math/clamp.test.ts\n+++ b/src/math/clamp.test.ts\n@@ -0,0 +1,5 @@\n+import { clamp } from './clamp';\n+test('clamps to range', () => {\n+  expect(clamp(5, 0, 3)).toBe(3);\n+  expect(clamp(-1, 0, 3)).toBe(0);\n+});\n"
+  },
+  {
+    "id": "h-l5-framework-migration",
+    "set": "holdout",
+    "expect": false,
+    "diff": "diff --git a/test/date.spec.js b/test/date.spec.js\n--- a/test/date.spec.js\n+++ b/test/date.spec.js\n@@ -1,7 +1,7 @@\n-const { expect } = require('chai');\n+import { expect, test } from 'vitest';\n const { addDays } = require('../src/date');\n-it('adds days across month end', () => {\n-  expect(addDays('2026-01-31', 1)).to.equal('2026-02-01');\n+test('adds days across month end', () => {\n+  expect(addDays('2026-01-31', 1)).toBe('2026-02-01');\n });\n"
+  },
+  {
+    "id": "h-l6-raise-threshold",
+    "set": "holdout",
+    "expect": false,
+    "diff": "diff --git a/jest.config.js b/jest.config.js\n--- a/jest.config.js\n+++ b/jest.config.js\n@@ -14,7 +14,7 @@ module.exports = {\n     global: {\n-      branches: 80,\n+      branches: 85,\n       functions: 90,\n"
+  }
+]

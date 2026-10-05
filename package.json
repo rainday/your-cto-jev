@@ -38,7 +38,8 @@
   "scripts": {
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
     "test": "tsc && node --test \"dist/*.test.js\"",
-    "prepublishOnly": "npm run build && node --test \"dist/*.test.js\""
+    "prepublishOnly": "npm run build && node --test \"dist/*.test.js\"",
+    "calibrate": "npm run build && node scripts/calibrate.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",

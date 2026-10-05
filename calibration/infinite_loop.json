@@ -1,0 +1,118 @@
+[
+  {
+    "id": "loop-no-edit-x2",
+    "set": "train",
+    "expect": true,
+    "command": "npm test",
+    "failures": [
+      {
+        "command": "npm test",
+        "error": "Exit code 1\nsrc/cart.test.ts: expected 180, received 18000",
+        "edited_after": false
+      },
+      {
+        "command": "npm test",
+        "error": "Exit code 1\nsrc/cart.test.ts: expected 180, received 18000",
+        "edited_after": false
+      }
+    ]
+  },
+  {
+    "id": "loop-no-edit-x1",
+    "set": "train",
+    "expect": true,
+    "command": "npm test",
+    "failures": [
+      {
+        "command": "npm test",
+        "error": "Exit code 1\nsrc/cart.test.ts: expected 180, received 18000",
+        "edited_after": false
+      }
+    ]
+  },
+  {
+    "id": "loop-edits-same-error-x3",
+    "set": "train",
+    "expect": true,
+    "command": "npm test",
+    "failures": [
+      {
+        "command": "npm test",
+        "error": "Exit code 1\nsrc/cart.test.ts: expected 180, received 18000",
+        "edited_after": true
+      },
+      {
+        "command": "npm test",
+        "error": "Exit code 1\nsrc/cart.test.ts: expected 180, received 18000",
+        "edited_after": true
+      },
+      {
+        "command": "npm test",
+        "error": "Exit code 1\nsrc/cart.test.ts: expected 180, received 18000",
+        "edited_after": true
+      }
+    ]
+  },
+  {
+    "id": "loop-edits-same-error-x2",
+    "set": "train",
+    "expect": true,
+    "command": "npm test",
+    "failures": [
+      {
+        "command": "npm test",
+        "error": "Exit code 1\nsrc/cart.test.ts: expected 180, received 18000",
+        "edited_after": true
+      },
+      {
+        "command": "npm test",
+        "error": "Exit code 1\nsrc/cart.test.ts: expected 180, received 18000",
+        "edited_after": true
+      }
+    ]
+  },
+  {
+    "id": "ok-first-retry-after-edit",
+    "set": "train",
+    "expect": false,
+    "command": "npm test",
+    "failures": [
+      {
+        "command": "npm test",
+        "error": "Exit code 1\nsrc/cart.test.ts: expected 180, received 18000",
+        "edited_after": true
+      }
+    ]
+  },
+  {
+    "id": "ok-error-changed",
+    "set": "train",
+    "expect": false,
+    "command": "npm test",
+    "failures": [
+      {
+        "command": "npm test",
+        "error": "Exit code 1\nsrc/cart.test.ts: expected 180, received 18000",
+        "edited_after": true
+      },
+      {
+        "command": "npm test",
+        "error": "Exit code 1\nsrc/cart.test.ts: TypeError: cart.applyDiscount is not a function",
+        "edited_after": true
+      }
+    ]
+  },
+  {
+    "id": "ok-different-command",
+    "set": "train",
+    "expect": false,
+    "command": "npm run build",
+    "failures": [
+      {
+        "command": "npm test",
+        "error": "Exit code 1\nsrc/cart.test.ts: expected 180, received 18000",
+        "edited_after": false
+      }
+    ]
+  }
+]

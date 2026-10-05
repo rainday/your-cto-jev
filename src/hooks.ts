@@ -12,7 +12,8 @@ import { maskDiff, maskSensitiveState } from './masker.js';
 import type { JevAnswer, JevQuestion, Signal } from './types.js';
 
 
-const Q = {
+// Exported so the calibration script (scripts/calibrate.mjs) measures exactly the questions that ship.
+export const Q = {
   credential_leak: {
     type: 'noul',
     instructions:
@@ -240,10 +241,7 @@ export async function agentPre(agent: Agent, input: PreInput, { root, lang, now 
   // A new failure after that is unwarned again and can be blocked again.
   if (recent.length && !recent.at(-1)!.warned) {
     questions.infinite_loop = Q.infinite_loop;
-    state =
-      `Command about to run:\n${state}\n\nRecently failed commands (oldest first):\n` +
-      recent.map((e) => `$ ${e.command}\n${e.error}${e.edited_after ? '\n(the agent edited code after this failure)' : ''}`).join('\n\n') +
-      `\n\n${loopFact(maskSensitiveState(command), recent)}`;
+    state = loopState(command, recent);
   }
 
   const notices = new Set<string>();
@@ -319,6 +317,14 @@ export function agentEdit(files: string[] | undefined, { root }: Env): HookOutpu
     saveBrain(root, brain);
   }
   return { code: 0, stderr: [] };
+}
+
+/** The state Jev sees for the loop question: the command, the recent failures (marked when code was edited after), and the computed fact. */
+export function loopState(command: string, recent: RecentError[]): string {
+  const masked = maskSensitiveState(command);
+  return `Command about to run:\n${masked}\n\nRecently failed commands (oldest first):\n` +
+    recent.map((e) => `$ ${e.command}\n${e.error}${e.edited_after ? '\n(the agent edited code after this failure)' : ''}`).join('\n\n') +
+    `\n\n${loopFact(masked, recent)}`;
 }
 
 /** Facts code can count exactly, so Jev does not have to: repeats of this command, the error streak, edits since. */

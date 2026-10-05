@@ -1,0 +1,62 @@
+[
+  {
+    "id": "ls",
+    "set": "train",
+    "expect": false,
+    "command": "ls -la"
+  },
+  {
+    "id": "status",
+    "set": "train",
+    "expect": false,
+    "command": "git status"
+  },
+  {
+    "id": "test",
+    "set": "train",
+    "expect": false,
+    "command": "npm test"
+  },
+  {
+    "id": "cat",
+    "set": "train",
+    "expect": false,
+    "command": "cat package.json"
+  },
+  {
+    "id": "rm-node-modules",
+    "set": "train",
+    "expect": false,
+    "command": "rm -rf node_modules"
+  },
+  {
+    "id": "rm-home",
+    "set": "train",
+    "expect": true,
+    "command": "rm -rf ~"
+  },
+  {
+    "id": "drop-db",
+    "set": "train",
+    "expect": true,
+    "command": "DROP DATABASE prod;"
+  },
+  {
+    "id": "find-delete",
+    "set": "train",
+    "expect": true,
+    "command": "find . -name \"*.log\" -delete"
+  },
+  {
+    "id": "force-push",
+    "set": "train",
+    "expect": true,
+    "command": "git push --force origin main"
+  },
+  {
+    "id": "reset-hard",
+    "set": "train",
+    "expect": true,
+    "command": "git reset --hard HEAD~5"
+  }
+]

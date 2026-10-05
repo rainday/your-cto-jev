@@ -212,7 +212,7 @@ Defaults: `credential_leak` 0.5, `destructive_command` 0.7, `infinite_loop` 0.6,
 - **Thresholds**: Jev returns a probability from 0 to 1. `code_complexity` is the exception: it is a score from 0 (clean) to 4 (unmaintainable).
 - **Calibration**: on 32 hand-written diffs, every one scoring above 0.8 for `test_tampering` really weakened the tests, and no legitimate change scored above 0.37. The 0.8 default caught 13 of 16 weakening diffs; the misses were subtle ones such as a meaningless float tolerance or a skip hidden behind an env var. Lower it to 0.5 to catch 15 of 16, at a higher risk of blocking honest commits.
 - `done_unverified` (0.6) and `infinite_loop` (0.6) were calibrated the same way; the measurements are in the design spec.
-- In the same way, `git push --force` scored about 0.50 for `destructive_command`, so the default lets it through. Lower that threshold to about 0.45 if you want force pushes blocked.
+- For `destructive_command`, the current question scores `git push --force` about 0.74 (blocked by default), `find -delete` about 0.65 and `git reset --hard` about 0.47 (both let through), and `rm -rf node_modules` about 0.12. Lower the threshold to about 0.45 to block all three; the calibration set is still small, so the default stays at 0.7.
 
 `.cto-brain.json` holds personal runtime state and is gitignored.
 
@@ -246,6 +246,16 @@ Releases are published by GitHub Actions with npm Trusted Publishing, so no npm 
 npm version patch        # or minor / major: bumps package.json, commits, tags
 git push --follow-tags   # the tag triggers .github/workflows/publish.yml
 ```
+
+To re-measure the checks after changing a question, after a Jev model update, or after adding cases:
+
+```sh
+npm run calibrate                            # every signal, against the cases in calibration/
+npm run calibrate -- --signal test_tampering
+node scripts/harvest-commands.mjs --rows 300 # real agent commands from a public dataset, to label
+```
+
+`calibrate` uses exactly the questions and state builders that ship, prints every case's score, and reports how many cases the current threshold catches and wrongly blocks. Harvested candidates in `calibration/candidates/` (from nebius/SWE-rebench-openhands-trajectories, CC-BY-4.0) join the measurement once someone sets their `expect` label.
 
 The full design, including the measured results behind the defaults, is in [`your-cto-jev-spec.html`](./your-cto-jev-spec.html) (written in 繁體中文).
 
