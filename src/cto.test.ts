@@ -1071,3 +1071,44 @@ test('done check for Cursor, Gemini and Codex runs on cto\'s own turn log, with 
   assert.equal(read('.gemini/settings.json').hooks.AfterAgent[0].hooks[0].command, 'cto --hook gemini-stop');
   assert.equal(read('.codex/hooks.json').hooks.Stop[0].hooks[0].command, 'cto --hook codex-stop');
 });
+
+test('done check: plan checklist items newly ticked in markdown are claims, judged once each, even in turns with no code edit', async () => {
+  const { tickedItems } = await import('./turn.js');
+  const { agentStop } = await import('./hooks.js');
+  const diff = [
+    'diff --git a/plan.md b/plan.md', '--- a/plan.md', '+++ b/plan.md', '@@ -1,6 +1,6 @@',
+    '-- [ ] T001 Install deps', '+- [x] T001 Install deps', // flipped: a claim
+    '-- [x] T002 Old wording', '+- [x] T002 Old wording, reworded', // already done before: not a claim
+    '+- [x] T003 New item added already done', // added done: a claim
+    '+- [ ] T004 Still open', // open: not a claim
+    '-- [ ] **Phase 1**', '+- [x] **Phase 1**',
+  ].join('\n');
+  const file = '- [x] T001 Install deps\n- [x] **Phase 1**\n  - [x] a\n  - [ ] b\n- [ ] next\n';
+  const got = tickedItems(diff, (f) => (f === 'plan.md' ? file : undefined));
+  assert.deepEqual(got.map((t) => [t.text, t.children]), [
+    ['T001 Install deps', []], ['T003 New item added already done', []], ['**Phase 1**', ['[x] a', '[ ] b']],
+  ]);
+
+  setKeys();
+  process.env.CTO_PROVIDER = 'openrouter';
+  let sent: any;
+  let calls = 0;
+  globalThis.fetch = (async (_u: string, init: any) => { calls++; sent = JSON.parse(init.body); return new Response(JSON.stringify(answers({ done_unverified: noul(0.9) }))); }) as any;
+  const root = tmp();
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: root });
+  git('init', '-q');
+  writeFileSync(join(root, 'tasks.md'), '- [ ] **Phase 1**\n  - [x] a\n  - [ ] b\n');
+  git('add', '.'); git('commit', '-qm', 'plan');
+  const stop = () => agentStop(agents.codex, { sessionId: 'P', cwd: root, lastMessage: 'Phase 1 done.', stopHookActive: false }, { root, lang: 'en' });
+
+  assert.deepEqual(await stop(), { code: 0, stderr: [] }, 'no ticks, no code edit: no check');
+  assert.equal(calls, 0);
+  writeFileSync(join(root, 'tasks.md'), '- [x] **Phase 1**\n  - [x] a\n  - [ ] b\n');
+  const out = await stop();
+  assert.equal(out.code, 2, 'a tick alone is a done claim');
+  assert.match(sent.state, /Plan checklist items marked done this turn:\n- tasks\.md: \*\*Phase 1\*\*\n  nested items: \[x\] a; \[ \] b/);
+  assert.match(sent.state, /Fact: 1 of the items marked done still have unchecked nested items/);
+  assert.deepEqual(await stop(), { code: 0, stderr: [] }, 'the same uncommitted tick is not judged again');
+  assert.equal(calls, 1);
+  setKeys(false);
+});

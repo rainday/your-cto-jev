@@ -26,7 +26,7 @@ export const personaDict: Record<Lang, Record<Signal, string>> = {
     infinite_loop: '同樣的錯誤又來了，你們在鬼打牆燒 Token。這次工具呼叫我擋下了，先去看邏輯。',
     architecture_violation: '這次變更偏離了 Sprint 目標。我放你過，但這筆帳記著。',
     test_tampering: '程式沒修好，倒先把測試改弱了？Commit 已攔下。去修程式，不是修測試。',
-    done_unverified: '說做完了？證據呢？最後一次改程式之後，我沒看到通過的測試或建置。先跑相關的檢查，看到通過再收工；真的跑不了，就老實告訴使用者哪些還沒驗證。',
+    done_unverified: '說做完了？證據呢？最後一次改程式之後，我沒看到通過的測試或建置，或是你打勾的計畫項目沒有證據。先跑相關的檢查，看到通過再收工；真的跑不了，就老實告訴使用者哪些還沒驗證。',
     code_complexity: '複雜度超標，過度工程化。這次不擋，但趕快重構。',
   },
   en: {
@@ -35,7 +35,7 @@ export const personaDict: Record<Lang, Record<Signal, string>> = {
     infinite_loop: 'Same error again. You are looping and burning tokens. This tool call is BLOCKED. Fix the logic first.',
     architecture_violation: 'This change drifts from the sprint goal. Letting it through, but I noticed.',
     test_tampering: 'Weakening the tests instead of fixing the code? Commit BLOCKED. Fix the code, not the tests.',
-    done_unverified: 'Done, you say? Show me. Nothing passing ran after your last code change. Run the relevant tests or build and see them pass before you stop; if you really cannot, tell the user plainly what is still unverified.',
+    done_unverified: 'Done, you say? Show me. Nothing passing ran after your last code change, or the plan items you checked off have no evidence. Run the relevant tests or build and see them pass before you stop; if you really cannot, tell the user plainly what is still unverified.',
     code_complexity: 'Over-engineered. Not blocking this time, but refactor it.',
   },
 };

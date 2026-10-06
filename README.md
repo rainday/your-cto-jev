@@ -34,13 +34,15 @@ Jev judges meaning and answers with probabilities, not prose. It costs about $0.
 | `test_tampering` | `git commit`s that touch tests or test config | **Blocks** the commit |
 | `destructive_command` | every agent shell command | **Blocks** the command |
 | `infinite_loop` | agent shell commands, after a recent failure | **Blocks** the command |
-| `done_unverified` | an agent ending a turn that edited code | **Sends it back to work** until the change is verified or the gap is disclosed |
+| `done_unverified` | an agent ending a turn that edited code or checked off plan items | **Sends it back to work** until the change is verified or the gap is disclosed |
 | `architecture_violation` | `git commit`, once you set a sprint goal | Warns only |
 | `code_complexity` | every `git commit` | Warns only |
 
 `test_tampering` catches the classic agent shortcut: making a red test green by skipping it, deleting its assertions, loosening the expectation, or lowering the coverage bar, instead of fixing the code. It lets through real fixes, new or tighter tests, refactors, and tests removed together with their feature.
 
 `done_unverified` catches the other classic shortcut: "Done, all tests pass!" when nothing ran after the last edit, the last run failed, or the claim is not backed by anything the agent actually did. It lets through turns that ran a passing check after the last edit, turns that changed only docs or CI config, and turns where the agent honestly says what it could not verify. It blocks at most once per stop, so it cannot loop.
+
+Checking off a plan item is the same claim. Whatever planning tool you use (spec-kit, GSD, Kiro, specOS, a hand-written `TODO.md`), plans end up as markdown checklists, so `cto` reads the uncommitted `- [ ]` to `- [x]` changes in tracked `.md` files and asks whether the turn backs them up. A phase or parent item counts as backed when everything nested under it is checked, or when the turn ran a passing check that covers it. Each tick is judged once. A turn that only ticks boxes, without doing the work, is checked too.
 
 Architecture and complexity only warn on purpose. They are subjective, and a gate that blocks too often teaches people to use `git commit --no-verify`, which switches off the secret check too.
 

@@ -36,7 +36,7 @@ const STATE = {
   test_tampering: (c) => maskDiff(c.diff),
   destructive_command: (c) => maskSensitiveState(c.command),
   infinite_loop: (c) => loopState(c.command, c.failures.map((f) => ({ ...f, at: new Date().toISOString() }))),
-  done_unverified: (c) => turnState(c.message, c.actions),
+  done_unverified: (c) => turnState(c.message, c.actions, c.ticked),
 };
 
 const dir = new URL('../calibration/', import.meta.url);

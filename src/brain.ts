@@ -22,6 +22,8 @@ export interface Brain {
   /** cto's own per-session turn log, for agents whose transcript format is not public (Cursor, Gemini CLI, Codex). */
   turns?: Record<string, { at: string; actions: TurnAction[]; reply?: string }>;
   last_check_at?: string;
+  /** Checklist items the done check already judged ("file:text"), so an uncommitted tick is judged once, not every turn. */
+  judged_items?: string[];
 }
 
 export const DEFAULT_CONFIG: CtoConfig = {

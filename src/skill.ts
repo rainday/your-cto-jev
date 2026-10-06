@@ -30,7 +30,7 @@ This repo is guarded by cto: every rule below is checked automatically, and brea
 
 - **Secrets stay out of code.** Use environment variables, never literal keys, tokens or passwords. (\`credential_leak\` blocks the commit)
 - **Fix the code, not the tests.** Never skip, delete or loosen a test, rewrite an expectation to match wrong output, or lower coverage. (\`test_tampering\` blocks the commit)
-- **Done means verified.** After your last code change, run the relevant tests or build and see them pass before saying done; otherwise say what is unverified. (\`done_unverified\` sends you back)
+- **Done means verified.** After your last code change, run the relevant tests or build and see them pass before saying done or checking off a plan item; otherwise say what is unverified. (\`done_unverified\` sends you back)
 - **Two strikes, change approach.** Same command, same error twice: stop retrying and try something different. (\`infinite_loop\` blocks the retry)
 - **Ask before anything irreversible:** deleting data, force-pushing, rewriting history, dropping a database. (\`destructive_command\` blocks it)
 - **Stay on the sprint goal in \`.cto.json\` and keep changes simple.** (\`architecture_violation\` and \`code_complexity\` warn)
@@ -55,7 +55,7 @@ Each rule below has a check behind it. Following the rules is faster than being 
 |---|---|
 | **Secrets stay out of code.** Never write API keys, tokens, passwords or private keys into code or committed files. Read them from environment variables. | \`credential_leak\` blocks the commit |
 | **Fix the code, not the tests.** When a test fails, change the code under test. Never skip, comment out or delete a test, loosen an assertion, change an expected value to match wrong output, swallow the error, or lower a coverage threshold. A test may only go away together with the feature it covers, and you say so. | \`test_tampering\` blocks the commit |
-| **Done means verified.** After your last code change, run the relevant tests, build or type check and see it pass before you say the work is done. If you cannot, say plainly what is not verified and why. | \`done_unverified\` sends you back to work |
+| **Done means verified.** After your last code change, run the relevant tests, build or type check and see it pass before you say the work is done. Checking off a plan item (\`- [x]\`) is the same claim; check off a phase or parent item only when everything under it is done. If you cannot, say plainly what is not verified and why. | \`done_unverified\` sends you back to work |
 | **Two strikes, change approach.** If a command fails with the same error twice, stop retrying. Read the error, inspect the code, and try something different. | \`infinite_loop\` blocks the retry once |
 | **Ask before anything irreversible.** Get the user's explicit OK before deleting data outside build output, force-pushing, rewriting shared history, or dropping a database. | \`destructive_command\` blocks the command |
 | **Stay on the sprint goal.** If \`.cto.json\` sets a \`sprint_goal\`, keep changes inside it and point out anything unrelated. | \`architecture_violation\` warns |

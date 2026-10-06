@@ -23,6 +23,9 @@ export interface JevResponse {
 /** One step of an agent's turn, as seen by the done check. */
 export type TurnAction = { kind: 'edit'; file: string } | { kind: 'run'; command: string; ok: boolean; tail: string };
 
+/** A markdown checklist item newly marked done ("- [x]"), with the checklist lines nested under it. */
+export interface Ticked { file: string; text: string; children: string[] }
+
 export type Signal =
   | 'credential_leak'
   | 'destructive_command'
